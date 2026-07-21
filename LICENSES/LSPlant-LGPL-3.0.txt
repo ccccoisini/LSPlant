@@ -1,0 +1,4 @@
+LSPlant is licensed by its upstream project. See:
+https://github.com/LSPosed/LSPlant
+
+This project builds LSPlant from source under third_party/LSPlant.

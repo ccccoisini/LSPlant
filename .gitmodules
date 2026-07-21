@@ -1,0 +1,7 @@
+[submodule "third_party/LSPlant"]
+	path = third_party/LSPlant
+	url = https://github.com/LSPosed/LSPlant.git
+	ignore = dirty
+[submodule "third_party/Dobby"]
+	path = third_party/Dobby
+	url = https://github.com/JingMatrix/Dobby.git

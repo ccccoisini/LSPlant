@@ -1,0 +1,9 @@
+lsplant.repo=https://github.com/LSPosed/LSPlant
+lsplant.commit=a96c7978a9fe578e0e265cc8e45cb117fa8250a3
+dobby.repo=https://github.com/JingMatrix/Dobby
+dobby.commit=05a09ac6807a6bb1726350e40ea4b127c1c79809
+libxposed.api=102.0.0
+zygisk.api=4
+ndk.version=29.0.14206865
+cmake.version=3.31.0
+lsplant.patches=android15-reflection-shorty.patch,unique-generated-hooker-class.patch

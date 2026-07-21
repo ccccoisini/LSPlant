@@ -1,0 +1,4 @@
+Dobby is licensed by its upstream project. See:
+https://github.com/JingMatrix/Dobby
+
+This project builds JingMatrix/Dobby from source under third_party/Dobby.

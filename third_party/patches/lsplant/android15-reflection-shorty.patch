@@ -1,0 +1,103 @@
+diff --git a/lsplant/src/main/jni/art/runtime/art_method.cxx b/lsplant/src/main/jni/art/runtime/art_method.cxx
+index 9106d06..650e934 100644
+--- a/lsplant/src/main/jni/art/runtime/art_method.cxx
++++ b/lsplant/src/main/jni/art/runtime/art_method.cxx
+@@ -62,6 +62,10 @@ class ArtMethod {
+     }
+
+ public:
++    inline static bool HasNativeGetMethodShorty() {
++        return GetMethodShortyL_ || GetMethodShorty_;
++    }
++
+     inline static const char *GetMethodShorty(JNIEnv *env, jobject method) {
+         if (GetMethodShortyL_) {
+             return GetMethodShortyL_(env, env->FromReflectedMethod(method));
+@@ -333,8 +337,7 @@ public:
+         }
+
+         if (!handler(GetMethodShortyL_, true, GetMethodShorty_)) {
+-            LOGE("Failed to find GetMethodShorty");
+-            return false;
++            LOGW("Failed to find GetMethodShorty, fallback to reflection shorty");
+         }
+
+         handler(PrettyMethod_, PrettyMethodStatic_, PrettyMethodMirror_);
+diff --git a/lsplant/src/main/jni/art/runtime/class_linker.cxx b/lsplant/src/main/jni/art/runtime/class_linker.cxx
+index 87a61d8..ae2c94d 100644
+--- a/lsplant/src/main/jni/art/runtime/class_linker.cxx
++++ b/lsplant/src/main/jni/art/runtime/class_linker.cxx
+@@ -358,9 +358,11 @@ public:
+                 dummy->SetNonNative();
+                 art_quick_to_interpreter_bridge_ = GetOptimizedCodeFor(dummy.get());
+             } else if (!handler(art_quick_to_interpreter_bridge_)) [[unlikely]] {
+-                return false;
++                LOGW("Failed to find art_quick_to_interpreter_bridge, deoptimize fallback disabled");
++            }
++            if (art_quick_to_interpreter_bridge_) {
++                LOGD("art_quick_to_interpreter_bridge = %p", &art_quick_to_interpreter_bridge_);
+             }
+-            LOGD("art_quick_to_interpreter_bridge = %p", &art_quick_to_interpreter_bridge_);
+         }
+         return true;
+     }
+diff --git a/lsplant/src/main/jni/lsplant.cc b/lsplant/src/main/jni/lsplant.cc
+index f6c2a13..f8fd84e 100644
+--- a/lsplant/src/main/jni/lsplant.cc
++++ b/lsplant/src/main/jni/lsplant.cc
+@@ -729,10 +729,9 @@ bool DoUnHook(ArtMethod *target, ArtMethod *backup) {
+     return true;
+ }
+
+-std::string GetProxyMethodShorty(JNIEnv *env, jobject proxy_method) {
+-    const auto return_type = JNI_CallObjectMethod(env, proxy_method, method_get_return_type);
+-    const auto parameter_types =
+-        JNI_Cast<jobjectArray>(JNI_CallObjectMethod(env, proxy_method, method_get_parameter_types));
++std::string GetExecutableShorty(JNIEnv *env, jobject executable_method, bool is_constructor) {
++    const auto parameter_types = JNI_Cast<jobjectArray>(
++        JNI_CallObjectMethod(env, executable_method, method_get_parameter_types));
+     auto integer_class = JNI_FindClass(env, "java/lang/Integer");
+     auto long_class = JNI_FindClass(env, "java/lang/Long");
+     auto float_class = JNI_FindClass(env, "java/lang/Float");
+@@ -784,12 +783,22 @@ std::string GetProxyMethodShorty(JNIEnv *env, jobject proxy_method) {
+         if (JNI_IsSameObject(env, type, void_type)) return 'V';
+         return 'L';
+     };
+-    out += type_to_shorty(return_type);
++    if (is_constructor) {
++        out += 'V';
++    } else {
++        const auto return_type =
++            JNI_CallObjectMethod(env, executable_method, method_get_return_type);
++        out += type_to_shorty(return_type);
++    }
+     for (const auto &param : parameter_types) {
+         out += type_to_shorty(param);
+     }
+     return out;
+ }
++
++std::string GetProxyMethodShorty(JNIEnv *env, jobject proxy_method) {
++    return GetExecutableShorty(env, proxy_method, false);
++}
+ }  // namespace
+
+ inline namespace v2 {
+@@ -852,12 +861,14 @@ using ::lsplant::IsHooked;
+             LOGE("callback_method is not a method of hooker_object");
+             return nullptr;
+         }
++        bool is_constructor = target->IsConstructor();
+         std::tie(built_class, hooker_field, hook_method, backup_method) = WrapScope(
+             env,
+             BuildDex(env, callback_class_loader.get(),
+-                     __builtin_expect(is_proxy, 0) ? GetProxyMethodShorty(env, target_method)
+-                                                   : ArtMethod::GetMethodShorty(env, target_method),
+-                     is_static, target->IsConstructor() ? "constructor" : target_method_name.get(),
++                     __builtin_expect(is_proxy || !ArtMethod::HasNativeGetMethodShorty(), 0)
++                         ? GetExecutableShorty(env, target_method, is_constructor)
++                         : ArtMethod::GetMethodShorty(env, target_method),
++                     is_static, is_constructor ? "constructor" : target_method_name.get(),
+                      class_name.get(), callback_method_name.get()));
+         if (!built_class || !hooker_field || !hook_method || !backup_method) {
+             LOGE("Failed to generate hooker");

@@ -1,0 +1,4 @@
+libxposed API is licensed by its upstream project. See:
+https://github.com/libxposed/api
+
+This project uses API version 102.0.0.

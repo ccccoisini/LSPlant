@@ -1,0 +1,20 @@
+# Local IDE and machine state
+.DS_Store
+.idea/
+.vscode/
+local.properties
+
+# Gradle and Android build output
+.gradle/
+build/
+*/build/
+**/.cxx/
+**/.externalNativeBuild/
+
+# Generated artifacts and temporary downloads
+dist/
+.tmp/
+
+# Logs and crash dumps
+*.log
+hs_err_pid*

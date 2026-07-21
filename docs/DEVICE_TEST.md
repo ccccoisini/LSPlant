@@ -1,0 +1,33 @@
+# 真机验收说明
+
+前置条件：
+
+- Android API 26+
+- Magisk 已启用 Zygisk
+- ADB 可用且设备已 root
+- 已安装 `io.hammer.developmentenvironmentdetection`
+
+安装 Magisk 模块：
+
+```sh
+./gradlew packageMagiskModule
+./scripts/install_device.sh
+adb reboot
+adb wait-for-device
+```
+
+自动验收：
+
+```sh
+./scripts/verify_device.sh \
+  --package io.hammer.developmentenvironmentdetection \
+  --module hammer-demo
+```
+
+成功时报告写入：
+
+```text
+dist/device-verification-report.txt
+```
+
+脚本会检查 `TARGET_MATCH`、`LSPLANT_INIT_OK`、`FRAMEWORK_DEX_LOADED`、`MODULE_DEX_LOADED`、`DEMO_HOOK_INSTALLED`、`DEMO_BEFORE`、`DEMO_AFTER`，并验证非目标进程不出现注入日志。

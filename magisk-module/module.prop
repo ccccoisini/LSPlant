@@ -1,0 +1,6 @@
+id=zygisk_lsplant_framework
+name=Zygisk LSPlant Hook Framework
+version=0.1.0
+versionCode=1
+author=Codex
+description=Zygisk + LSPlant + libxposed API 102 dynamic hook framework.

@@ -7,5 +7,3 @@
 - [DEVICE_TEST.md](DEVICE_TEST.md): 真机验证流程。
 - [TROUBLESHOOTING.md](TROUBLESHOOTING.md): 常见问题排查。
 - [COMPATIBILITY.md](COMPATIBILITY.md): Android/ART 兼容性记录。
-- [HOOK_ENGINE_ANALYSIS.md](HOOK_ENGINE_ANALYSIS.md): LSPlant 与 Pine 后端差异、`libart.so` 触达边界分析。
-- [Zygisk_LSPlant_libxposed_API102_Hook_Framework_Implementation.md](Zygisk_LSPlant_libxposed_API102_Hook_Framework_Implementation.md): 框架实现设计记录。

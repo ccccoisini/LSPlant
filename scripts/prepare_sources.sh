@@ -6,6 +6,8 @@ THIRD_PARTY="$ROOT_DIR/third_party"
 LSPLANT_DIR="$THIRD_PARTY/LSPlant"
 DOBBY_DIR="$THIRD_PARTY/Dobby"
 LSPLANT_PATCH_DIR="$THIRD_PARTY/patches/lsplant"
+LSPLANT_REPO="https://github.com/ccccoisini/LSPlant.git"
+LSPLANT_COMMIT="d8b5d1dbb664abc606644036822e4bb64547edf6"
 APPLY_PATCHES_ONLY=0
 
 while [ $# -gt 0 ]; do
@@ -94,12 +96,13 @@ apply_lsplant_patch() {
   fi
 }
 
-ensure_repo "$LSPLANT_DIR" https://github.com/LSPosed/LSPlant.git
+ensure_repo "$LSPLANT_DIR" "$LSPLANT_REPO"
+git -C "$LSPLANT_DIR" remote set-url origin "$LSPLANT_REPO"
 if [ "$APPLY_PATCHES_ONLY" -eq 0 ]; then
   for_each_patch "$LSPLANT_PATCH_DIR" unapply_lsplant_patch
   ensure_clean "$LSPLANT_DIR"
-  git -C "$LSPLANT_DIR" fetch origin master
-  git -C "$LSPLANT_DIR" checkout --detach origin/master
+  git -C "$LSPLANT_DIR" fetch origin "$LSPLANT_COMMIT"
+  git -C "$LSPLANT_DIR" checkout --detach "$LSPLANT_COMMIT"
 fi
 git -C "$LSPLANT_DIR" submodule sync --recursive
 git -C "$LSPLANT_DIR" submodule update --init --recursive \
@@ -118,7 +121,7 @@ LSPLANT_SHA="$(git -C "$LSPLANT_DIR" rev-parse HEAD)"
 DOBBY_SHA="$(git -C "$DOBBY_DIR" rev-parse HEAD)"
 
 cat > "$ROOT_DIR/versions.lock" <<EOF_LOCK
-lsplant.repo=https://github.com/LSPosed/LSPlant
+lsplant.repo=https://github.com/ccccoisini/LSPlant
 lsplant.commit=$LSPLANT_SHA
 dobby.repo=https://github.com/JingMatrix/Dobby
 dobby.commit=$DOBBY_SHA

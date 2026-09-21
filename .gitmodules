@@ -1,6 +1,6 @@
 [submodule "third_party/LSPlant"]
 	path = third_party/LSPlant
-	url = https://github.com/LSPosed/LSPlant.git
+	url = https://github.com/ccccoisini/LSPlant.git
 	ignore = dirty
 [submodule "third_party/Dobby"]
 	path = third_party/Dobby

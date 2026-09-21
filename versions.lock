@@ -6,4 +6,4 @@ libxposed.api=102.0.0
 zygisk.api=4
 ndk.version=29.0.14206865
 cmake.version=3.31.0
-lsplant.patches=android15-reflection-shorty.patch,unique-generated-hooker-class.patch
+lsplant.patches=android15-reflection-shorty.patch

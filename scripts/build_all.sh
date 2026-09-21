@@ -27,7 +27,7 @@ if [ "$PREPARE_SOURCES" -eq 1 ]; then
   ./scripts/prepare_sources.sh
 else
   if [ -d "$ROOT_DIR/.git" ]; then
-    git submodule update --init third_party/LSPlant third_party/Dobby || true
+    git submodule update --init third_party/LSPlant third_party/Dobby
   fi
   ./scripts/prepare_sources.sh --apply-patches-only
   if ! is_git_worktree "$ROOT_DIR/third_party/LSPlant" || ! is_git_worktree "$ROOT_DIR/third_party/Dobby"; then

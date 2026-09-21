@@ -52,6 +52,16 @@ ensure_clean() {
   fi
 }
 
+verify_lsplant_commit() {
+  local actual_commit
+  actual_commit="$(git -C "$LSPLANT_DIR" rev-parse HEAD)"
+  if [ "$actual_commit" != "$LSPLANT_COMMIT" ]; then
+    echo "Unexpected LSPlant commit: expected $LSPLANT_COMMIT, got $actual_commit" >&2
+    echo "Run ./scripts/prepare_sources.sh to restore the pinned source revision." >&2
+    exit 1
+  fi
+}
+
 for_each_patch() {
   local patch_dir="$1"
   local callback="$2"
@@ -85,13 +95,15 @@ unapply_lsplant_patch() {
 
 apply_lsplant_patch() {
   local patch_file="$1"
-  if git -C "$LSPLANT_DIR" apply --check "$patch_file" >/dev/null 2>&1; then
-    git -C "$LSPLANT_DIR" apply "$patch_file"
-    echo "Applied LSPlant patch: $(basename "$patch_file")"
-  elif git -C "$LSPLANT_DIR" apply --reverse --check "$patch_file" >/dev/null 2>&1; then
+  if git -C "$LSPLANT_DIR" apply --reverse --check "$patch_file" >/dev/null 2>&1; then
     echo "LSPlant patch already applied: $(basename "$patch_file")"
+  elif git -C "$LSPLANT_DIR" apply --check "$patch_file" >/dev/null 2>&1; then
+    echo "Applying required LSPlant patch: $(basename "$patch_file")"
+    git -C "$LSPLANT_DIR" apply "$patch_file"
+    git -C "$LSPLANT_DIR" apply --reverse --check "$patch_file" >/dev/null
+    echo "Applied LSPlant patch: $(basename "$patch_file")"
   else
-    echo "Failed to apply LSPlant patch: $patch_file" >&2
+    echo "LSPlant patch is incompatible with commit $LSPLANT_COMMIT: $patch_file" >&2
     exit 1
   fi
 }
@@ -104,6 +116,7 @@ if [ "$APPLY_PATCHES_ONLY" -eq 0 ]; then
   git -C "$LSPLANT_DIR" fetch origin "$LSPLANT_COMMIT"
   git -C "$LSPLANT_DIR" checkout --detach "$LSPLANT_COMMIT"
 fi
+verify_lsplant_commit
 git -C "$LSPLANT_DIR" submodule sync --recursive
 git -C "$LSPLANT_DIR" submodule update --init --recursive \
   lsplant/src/main/jni/external/dex_builder \

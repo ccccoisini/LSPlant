@@ -44,7 +44,7 @@ run_root() {
   local local_script
   local remote_script
   local_script="$(mktemp)"
-  remote_script="/data/local/tmp/zhook-root-$$-$RANDOM.sh"
+  remote_script="/data/local/tmp/zygisk_framework-root-$$-$RANDOM.sh"
   printf '%s\n' "$script" > "$local_script"
   run_adb push "$local_script" "$remote_script" >/dev/null
   rm -f "$local_script"
@@ -82,18 +82,18 @@ if [ "$API" -lt 26 ]; then
   exit 1
 fi
 
-run_root "mkdir -p /data/adb/hook/modules/$MODULE/META-INF/xposed"
-run_root "printf '%s\n' '$PACKAGE' > /data/adb/hook/target.txt"
+run_root "mkdir -p /data/adb/zygisk_framework/modules/$MODULE/META-INF/xposed"
+run_root "printf '%s\n' '$PACKAGE' > /data/adb/zygisk_framework/target.txt"
 run_adb push "$ROOT_DIR/dist/demo-hook-module/module.dex" "/sdcard/Download/$MODULE.dex" >/dev/null
-run_root "cp /sdcard/Download/$MODULE.dex /data/adb/hook/modules/$MODULE/module.dex"
+run_root "cp /sdcard/Download/$MODULE.dex /data/adb/zygisk_framework/modules/$MODULE/module.dex"
 for file in java_init.list module.prop scope.list; do
   run_adb push "$ROOT_DIR/dist/demo-hook-module/META-INF/xposed/$file" "/sdcard/Download/$file" >/dev/null
-  run_root "cp /sdcard/Download/$file /data/adb/hook/modules/$MODULE/META-INF/xposed/$file"
+  run_root "cp /sdcard/Download/$file /data/adb/zygisk_framework/modules/$MODULE/META-INF/xposed/$file"
 done
-run_root "sha256sum /data/adb/hook/modules/$MODULE/module.dex | cut -d' ' -f1 > /data/adb/hook/modules/$MODULE/module.sha256"
-run_root "chown -R 0:0 /data/adb/hook && chmod 0755 /data/adb/hook && chmod 0644 /data/adb/hook/target.txt"
-run_root "find /data/adb/hook/modules -type d -exec chmod 0755 {} \\;"
-run_root "find /data/adb/hook/modules -type f -exec chmod 0644 {} \\;"
+run_root "sha256sum /data/adb/zygisk_framework/modules/$MODULE/module.dex | cut -d' ' -f1 > /data/adb/zygisk_framework/modules/$MODULE/module.sha256"
+run_root "chown -R 0:0 /data/adb/zygisk_framework && chmod 0755 /data/adb/zygisk_framework && chmod 0644 /data/adb/zygisk_framework/target.txt"
+run_root "find /data/adb/zygisk_framework/modules -type d -exec chmod 0755 {} \\;"
+run_root "find /data/adb/zygisk_framework/modules -type f -exec chmod 0644 {} \\;"
 
 run_adb shell am force-stop "$PACKAGE" >/dev/null || true
 run_adb logcat -c
@@ -103,7 +103,7 @@ PID="$(run_adb shell pidof "$PACKAGE" | tr -d '\r' || true)"
 record "targetPid=$PID"
 
 LOG_FILE="$(mktemp)"
-run_adb logcat -d -s ZHook.Native:V ZHook.Runtime:V ZHook.Module:V ZHook.Companion:V AndroidRuntime:E > "$LOG_FILE"
+run_adb logcat -d -s zygisk_framework.Native:V zygisk_framework.Runtime:V zygisk_framework.Module:V zygisk_framework.Companion:V AndroidRuntime:E > "$LOG_FILE"
 cat "$LOG_FILE" >> "$REPORT"
 
 FAIL=0
@@ -128,7 +128,7 @@ run_adb logcat -c
 run_adb shell am force-stop com.android.settings >/dev/null || true
 run_adb shell monkey -p com.android.settings -c android.intent.category.LAUNCHER 1 >/dev/null || true
 sleep 3
-NON_TARGET_LOG="$(run_adb logcat -d -s ZHook.Native:V ZHook.Runtime:V ZHook.Module:V)"
+NON_TARGET_LOG="$(run_adb logcat -d -s zygisk_framework.Native:V zygisk_framework.Runtime:V zygisk_framework.Module:V)"
 if echo "$NON_TARGET_LOG" | grep -Fq "TARGET_MATCH process=com.android.settings"; then
   record "FAIL non_target_injected=true"
   FAIL=1

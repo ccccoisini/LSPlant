@@ -2,7 +2,7 @@
 
 #include <string_view>
 
-namespace zhook {
+namespace zygisk_framework {
 
 /**
  * 解析当前进程 libart.so 中的完整符号名。
@@ -20,4 +20,4 @@ void *ResolveArtSymbol(std::string_view symbol_name);
  */
 void *ResolveArtSymbolPrefix(std::string_view symbol_prefix);
 
-}  // namespace zhook
+}  // namespace zygisk_framework

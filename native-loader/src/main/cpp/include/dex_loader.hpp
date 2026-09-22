@@ -4,7 +4,7 @@
 
 #include "state.hpp"
 
-namespace zhook {
+namespace zygisk_framework {
 
 /**
  * 装载 framework.dex，按 mapping 绑定 NativeBridge，并启动 Java Runtime。
@@ -38,4 +38,4 @@ bool PreloadDexIntoClassLoader(JNIEnv *env, jobject dex_buffer, jobject class_lo
  */
 jobject CreateDexClassLoader(JNIEnv *env, jobject dex_buffer, jobject parent);
 
-}  // namespace zhook
+}  // namespace zygisk_framework

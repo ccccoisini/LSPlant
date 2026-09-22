@@ -22,6 +22,6 @@ public class TemplateHookModule extends XposedModule {
      */
     @Override
     public void onModuleLoaded(ModuleLoadedParam param) {
-        log(Log.INFO, "ZHook.Module", "TEMPLATE_MODULE_LOADED process=" + param.getProcessName());
+        log(Log.INFO, "zygisk_framework.Module", "TEMPLATE_MODULE_LOADED process=" + param.getProcessName());
     }
 }

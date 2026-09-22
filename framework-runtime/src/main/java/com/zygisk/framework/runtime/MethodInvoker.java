@@ -1,4 +1,4 @@
-package com.example.zygiskhook.runtime;
+package com.zygisk.framework.runtime;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;

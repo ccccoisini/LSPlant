@@ -4,7 +4,7 @@
 |---|---:|---|
 | 模块入口与 attachFramework | 支持 | 每个模块独立 `FrameworkXposedInterface`。 |
 | onModuleLoaded | 支持 | Java runtime 装载后分发一次。 |
-| onPackageLoaded/onPackageReady | 支持 | `Application.attach(Context)` Bootstrap；失败时降级并记录 `LIFECYCLE_DEGRADED_MODE`。 |
+| onPackageLoaded/onPackageReady | 支持 | 优先通过 `Instrumentation.newApplication(...)` 在 Application 创建前 Bootstrap，并保留 `Application.attach(Context)` 兼容回退；两个入口均不可用时记录 `LIFECYCLE_DEGRADED_MODE`。 |
 | Method Hook | 支持 | 一目标方法一个 LSPlant Hook，Java 快照分发。 |
 | Constructor Hook | 部分 | LSPlant 通道可接入；Constructor Invoker 未完整支持。 |
 | 多 Hook 链 | 支持 | 不持锁执行用户 Hook。 |

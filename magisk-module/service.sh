@@ -1,2 +1,2 @@
 #!/system/bin/sh
-log -t ZHook.Native "SERVICE_READY module=zygisk_lsplant_framework"
+log -t zygisk_framework.Native "SERVICE_READY module=zygisk_framework"

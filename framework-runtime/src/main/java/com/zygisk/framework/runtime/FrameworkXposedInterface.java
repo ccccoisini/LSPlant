@@ -1,4 +1,4 @@
-package com.example.zygiskhook.runtime;
+package com.zygisk.framework.runtime;
 
 import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
@@ -27,17 +27,17 @@ final class FrameworkXposedInterface implements XposedInterface {
 
     @Override
     public String getFrameworkName() {
-        return "Zygisk LSPlant Framework";
+        return BuildConfig.FRAMEWORK_NAME;
     }
 
     @Override
     public String getFrameworkVersion() {
-        return "0.1.0";
+        return BuildConfig.FRAMEWORK_VERSION;
     }
 
     @Override
     public long getFrameworkVersionCode() {
-        return 1L;
+        return BuildConfig.FRAMEWORK_VERSION_CODE;
     }
 
     @Override

@@ -1,23 +1,23 @@
 cmake_minimum_required(VERSION 3.28)
-project(zygisk_lsplant_framework)
+project(zygisk_framework)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_SCAN_FOR_MODULES ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-if (NOT DEFINED ZH_GENERATED_FRAMEWORK_DIR)
-    set(ZH_GENERATED_FRAMEWORK_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
+if (NOT DEFINED ZYGISK_FRAMEWORK_GENERATED_FRAMEWORK_DIR)
+    set(ZYGISK_FRAMEWORK_GENERATED_FRAMEWORK_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
 endif()
 
 execute_process(
     COMMAND git -C ${CMAKE_SOURCE_DIR}/../../../../third_party/LSPlant rev-parse HEAD
-    OUTPUT_VARIABLE ZH_LSPLANT_COMMIT
+    OUTPUT_VARIABLE ZYGISK_FRAMEWORK_LSPLANT_COMMIT
     OUTPUT_STRIP_TRAILING_WHITESPACE
 )
 execute_process(
     COMMAND git -C ${CMAKE_SOURCE_DIR}/../../../../third_party/Dobby rev-parse HEAD
-    OUTPUT_VARIABLE ZH_DOBBY_COMMIT
+    OUTPUT_VARIABLE ZYGISK_FRAMEWORK_DOBBY_COMMIT
     OUTPUT_STRIP_TRAILING_WHITESPACE
 )
 
@@ -34,7 +34,7 @@ add_subdirectory(
     lsplant
 )
 
-add_library(zygisk_hook SHARED
+add_library(zygisk_framework SHARED
     zygisk_entry.cpp
     companion.cpp
     target_client.cpp
@@ -45,27 +45,27 @@ add_library(zygisk_hook SHARED
     jni_bridge.cpp
 )
 
-target_include_directories(zygisk_hook PRIVATE
+target_include_directories(zygisk_framework PRIVATE
     include
-    ${ZH_GENERATED_FRAMEWORK_DIR}
+    ${ZYGISK_FRAMEWORK_GENERATED_FRAMEWORK_DIR}
 )
-target_compile_definitions(zygisk_hook PRIVATE
-    ZH_LSPLANT_COMMIT="${ZH_LSPLANT_COMMIT}"
-    ZH_DOBBY_COMMIT="${ZH_DOBBY_COMMIT}"
+target_compile_definitions(zygisk_framework PRIVATE
+    ZYGISK_FRAMEWORK_LSPLANT_COMMIT="${ZYGISK_FRAMEWORK_LSPLANT_COMMIT}"
+    ZYGISK_FRAMEWORK_DOBBY_COMMIT="${ZYGISK_FRAMEWORK_DOBBY_COMMIT}"
 )
-target_compile_options(zygisk_hook PRIVATE
+target_compile_options(zygisk_framework PRIVATE
     -fvisibility=hidden
     -fvisibility-inlines-hidden
     -ffunction-sections
     -fdata-sections
 )
-target_link_options(zygisk_hook PRIVATE
+target_link_options(zygisk_framework PRIVATE
     -Wl,--gc-sections
     -Wl,--exclude-libs,ALL
     -Wl,--strip-all
     -Wl,--hash-style=both
 )
-target_link_libraries(zygisk_hook
+target_link_libraries(zygisk_framework
     PRIVATE
     lsplant_static
     dobby_static

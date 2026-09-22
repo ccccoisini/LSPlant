@@ -1,4 +1,4 @@
-package com.example.zygiskhook.runtime;
+package com.zygisk.framework.runtime;
 
 import android.app.AppComponentFactory;
 import android.content.pm.ApplicationInfo;
@@ -12,7 +12,7 @@ import java.util.List;
 import io.github.libxposed.api.XposedModule;
 
 final class ModuleManager {
-    private static final String TAG = "ZHook.Runtime";
+    private static final String TAG = "zygisk_framework.Runtime";
 
     private final HookRegistry hookRegistry = new HookRegistry();
     private final ArrayList<LoadedModule> modules = new ArrayList<LoadedModule>();

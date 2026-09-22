@@ -1,11 +1,22 @@
 import java.security.MessageDigest
 import java.time.Instant
+import java.util.Properties
 
 plugins {
     id("com.android.library") version "8.13.2" apply false
 }
 
-val frameworkVersion = "0.1.0"
+val moduleProperties = Properties().apply {
+    file("magisk-module/module.prop").inputStream().use { load(it) }
+}
+val frameworkId = moduleProperties.getProperty("id")
+    ?: error("magisk-module/module.prop is missing id")
+val frameworkName = moduleProperties.getProperty("name")
+    ?: error("magisk-module/module.prop is missing name")
+val frameworkVersion = moduleProperties.getProperty("version")
+    ?: error("magisk-module/module.prop is missing version")
+val frameworkVersionCode = moduleProperties.getProperty("versionCode")?.toIntOrNull()
+    ?: error("magisk-module/module.prop has an invalid versionCode")
 val libxposedApiVersion = "102.0.0"
 val compileSdkVersion = 35
 val minSdkVersion = 26
@@ -13,7 +24,10 @@ val buildToolsVersionValue = "35.0.0"
 val ndkVersionValue = "29.0.14206865"
 val cmakeVersionValue = "3.31.0"
 
+extra["frameworkId"] = frameworkId
+extra["frameworkName"] = frameworkName
 extra["frameworkVersion"] = frameworkVersion
+extra["frameworkVersionCode"] = frameworkVersionCode
 extra["libxposedApiVersion"] = libxposedApiVersion
 extra["compileSdkVersion"] = compileSdkVersion
 extra["minSdkVersion"] = minSdkVersion
@@ -34,6 +48,12 @@ tasks.register("packageMagiskModule") {
         val distDir = layout.buildDirectory.dir("dist-work").get().asFile
         val rootDist = file("dist")
         delete(distDir)
+        delete(rootDist.listFiles()?.filter { it.isFile &&
+                (it.extension == "zip" || it.name in setOf(
+                    "build-info.json", "framework.dex", "framework.mapping", "SHA256SUMS",
+                    "device-verification-report.txt"))
+        } ?: emptyList<File>())
+        delete(File(rootDist, "demo-hook-module"))
         distDir.mkdirs()
         rootDist.mkdirs()
 
@@ -43,11 +63,11 @@ tasks.register("packageMagiskModule") {
         }
         copy {
             from("demo-hook-module/build/outputs/hook")
-            into(File(distDir, "hook/modules/hammer-demo"))
+            into(File(distDir, "modules/hammer-demo"))
         }
 
         val soFiles = fileTree("native-loader/build").matching {
-            include("**/libzygisk_hook.so")
+            include("**/libzygisk_framework.so")
         }.files
         val abiNames = listOf("arm64-v8a")
         abiNames.forEach { abi ->
@@ -65,7 +85,10 @@ tasks.register("packageMagiskModule") {
         val dobbySha = readGitSha("third_party/Dobby")
         val buildInfo = """
             {
+              "moduleId": "$frameworkId",
+              "moduleName": "$frameworkName",
               "frameworkVersion": "$frameworkVersion",
+              "frameworkVersionCode": $frameworkVersionCode,
               "libxposedApi": "$libxposedApiVersion",
               "lsplantCommit": "$lsplantSha",
               "dobbyCommit": "$dobbySha",
@@ -80,7 +103,7 @@ tasks.register("packageMagiskModule") {
         File(rootDist, "build-info.json").writeText(buildInfo)
         File(distDir, "zygisk/build-info.json").writeText(buildInfo)
 
-        val zipFile = File(rootDist, "zygisk-lsplant-framework-$frameworkVersion.zip")
+        val zipFile = File(rootDist, "$frameworkId-$frameworkVersion.zip")
         delete(zipFile)
         ant.withGroovyBuilder {
             "zip"("destfile" to zipFile.absolutePath, "basedir" to distDir.absolutePath)
@@ -100,7 +123,7 @@ tasks.register("packageMagiskModule") {
         }
 
         val checksumFiles = fileTree(rootDist).files
-            .filter { it.isFile && it.name != "SHA256SUMS" }
+            .filter { it.isFile && it.name != "SHA256SUMS" && it.name != "device-verification-report.txt" }
             .sortedBy { it.relativeTo(rootDist).invariantSeparatorsPath }
         File(rootDist, "SHA256SUMS").writeText(
             checksumFiles.joinToString(separator = System.lineSeparator()) {

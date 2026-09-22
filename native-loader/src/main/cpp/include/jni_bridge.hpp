@@ -2,7 +2,7 @@
 
 #include <jni.h>
 
-namespace zhook {
+namespace zygisk_framework {
 
 /**
  * 向 framework.dex 中的 NativeBridge 类注册所有 JNI 方法。
@@ -13,4 +13,4 @@ namespace zhook {
  */
 bool RegisterNativeBridge(JNIEnv *env, jclass native_bridge_class);
 
-}  // namespace zhook
+}  // namespace zygisk_framework

@@ -6,15 +6,15 @@
 #include "logging.hpp"
 #include "lsplant_engine.hpp"
 
-#ifndef ZH_LSPLANT_COMMIT
-#define ZH_LSPLANT_COMMIT "unknown"
+#ifndef ZYGISK_FRAMEWORK_LSPLANT_COMMIT
+#define ZYGISK_FRAMEWORK_LSPLANT_COMMIT "unknown"
 #endif
 
-#ifndef ZH_DOBBY_COMMIT
-#define ZH_DOBBY_COMMIT "unknown"
+#ifndef ZYGISK_FRAMEWORK_DOBBY_COMMIT
+#define ZYGISK_FRAMEWORK_DOBBY_COMMIT "unknown"
 #endif
 
-namespace zhook {
+namespace zygisk_framework {
 namespace {
 
 jobject NativeHook(JNIEnv *env, jclass, jobject executable, jobject hooker_object,
@@ -35,8 +35,8 @@ jboolean NativeDeoptimize(JNIEnv *env, jclass, jobject executable) {
 }
 
 jstring NativeGetBuildInfo(JNIEnv *env, jclass) {
-    std::string json = std::string("{\"lsplantCommit\":\"") + ZH_LSPLANT_COMMIT +
-                       "\",\"dobbyCommit\":\"" + ZH_DOBBY_COMMIT +
+    std::string json = std::string("{\"lsplantCommit\":\"") + ZYGISK_FRAMEWORK_LSPLANT_COMMIT +
+                       "\",\"dobbyCommit\":\"" + ZYGISK_FRAMEWORK_DOBBY_COMMIT +
                        "\",\"zygiskApi\":4}";
     return env->NewStringUTF(json.c_str());
 }
@@ -80,15 +80,15 @@ bool RegisterNativeBridge(JNIEnv *env, jclass native_bridge_class) {
             kNativeBridgeMethods,
             sizeof(kNativeBridgeMethods) / sizeof(kNativeBridgeMethods[0]));
     if (result != JNI_OK) {
-        ZH_LOGE(ZH_LOG_TAG_NATIVE, "NATIVE_BRIDGE_REGISTER_FAILED code=REGISTER_NATIVES");
+        ZYGISK_FRAMEWORK_LOGE(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE, "NATIVE_BRIDGE_REGISTER_FAILED code=REGISTER_NATIVES");
         if (env->ExceptionCheck()) {
             env->ExceptionDescribe();
             env->ExceptionClear();
         }
         return false;
     }
-    ZH_LOGI(ZH_LOG_TAG_NATIVE, "NATIVE_BRIDGE_REGISTERED");
+    ZYGISK_FRAMEWORK_LOGI(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE, "NATIVE_BRIDGE_REGISTERED");
     return true;
 }
 
-}  // namespace zhook
+}  // namespace zygisk_framework

@@ -13,7 +13,7 @@ import io.github.libxposed.api.XposedModule;
  * 用于真机验收的 API 102 Hook 模块入口。
  */
 public final class HammerDemoModule extends XposedModule {
-    private static final String TAG = "ZHook.Module";
+    private static final String TAG = "zygisk_framework.Module";
     private static final String TARGET_PACKAGE = "io.hammer.developmentenvironmentdetection";
 
     /**

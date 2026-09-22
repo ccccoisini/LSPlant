@@ -3,7 +3,7 @@
 业务模块目录格式：
 
 ```text
-/data/adb/hook/modules/<module-id>/
+/data/adb/zygisk_framework/modules/<module-id>/
 ├── module.dex
 ├── module.sha256
 └── META-INF/xposed/
@@ -27,6 +27,6 @@
 ```sh
 ./scripts/build_hook_dex.sh
 adb push demo-hook-module/build/outputs/hook/module.dex /sdcard/Download/hammer-demo.dex
-adb shell su -c 'cp /sdcard/Download/hammer-demo.dex /data/adb/hook/modules/hammer-demo/module.dex'
-adb shell su -c 'sha256sum /data/adb/hook/modules/hammer-demo/module.dex | cut -d" " -f1 > /data/adb/hook/modules/hammer-demo/module.sha256'
+adb shell su -c 'cp /sdcard/Download/hammer-demo.dex /data/adb/zygisk_framework/modules/hammer-demo/module.dex'
+adb shell su -c 'sha256sum /data/adb/zygisk_framework/modules/hammer-demo/module.dex | cut -d" " -f1 > /data/adb/zygisk_framework/modules/hammer-demo/module.sha256'
 ```

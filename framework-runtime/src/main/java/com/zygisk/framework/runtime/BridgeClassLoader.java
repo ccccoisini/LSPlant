@@ -1,4 +1,4 @@
-package com.example.zygiskhook.runtime;
+package com.zygisk.framework.runtime;
 
 /**
  * 在模块 ClassLoader 和目标 App ClassLoader 之间提供受控委派的桥接加载器。
@@ -9,7 +9,7 @@ package com.example.zygiskhook.runtime;
 public final class BridgeClassLoader extends ClassLoader {
     private static final String[] FRAMEWORK_PREFIXES = {
             "io.github.libxposed.api.",
-            "com.example.zygiskhook.runtime."
+            "com.zygisk.framework.runtime."
     };
 
     private final ClassLoader frameworkClassLoader;

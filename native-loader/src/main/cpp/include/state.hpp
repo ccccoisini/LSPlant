@@ -4,7 +4,7 @@
 #include <vector>
 #include <cstdint>
 
-namespace zhook {
+namespace zygisk_framework {
 
 /**
  * 保存 Root Companion 返回的单个业务模块描述。
@@ -35,4 +35,4 @@ struct ProcessState {
  */
 void CloseFd(int &fd);
 
-}  // namespace zhook
+}  // namespace zygisk_framework

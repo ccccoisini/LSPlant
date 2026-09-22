@@ -17,7 +17,7 @@
 
 #include "logging.hpp"
 
-namespace zhook {
+namespace zygisk_framework {
 namespace {
 
 #if defined(__LP64__)
@@ -256,11 +256,11 @@ void EnsureArtResolverReady() {
         TryMapArtElf();
 
         if (g_art.path.empty()) {
-            ZH_LOGE(ZH_LOG_TAG_NATIVE, "ART_LIBRARY_NOT_FOUND");
+            ZYGISK_FRAMEWORK_LOGE(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE, "ART_LIBRARY_NOT_FOUND");
             return;
         }
 
-        ZH_LOGI(ZH_LOG_TAG_NATIVE, "ART_LIBRARY_READY path=%s base=%p handle=%p elf=%zu",
+        ZYGISK_FRAMEWORK_LOGI(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE, "ART_LIBRARY_READY path=%s base=%p handle=%p elf=%zu",
                 g_art.path.c_str(), reinterpret_cast<void *>(g_art.load_bias), g_art.handle,
                 g_art.elf_size);
     });
@@ -284,7 +284,7 @@ void *ResolveArtSymbol(std::string_view symbol_name) {
         return address;
     }
 
-    ZH_LOGE(ZH_LOG_TAG_NATIVE, "ART_SYMBOL_NOT_FOUND symbol=%s", symbol.c_str());
+    ZYGISK_FRAMEWORK_LOGE(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE, "ART_SYMBOL_NOT_FOUND symbol=%s", symbol.c_str());
     return nullptr;
 }
 
@@ -294,9 +294,9 @@ void *ResolveArtSymbolPrefix(std::string_view symbol_prefix) {
         return address;
     }
 
-    ZH_LOGW(ZH_LOG_TAG_NATIVE, "ART_SYMBOL_NOT_FOUND symbol=%.*s*",
+    ZYGISK_FRAMEWORK_LOGW(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE, "ART_SYMBOL_NOT_FOUND symbol=%.*s*",
             static_cast<int>(symbol_prefix.size()), symbol_prefix.data());
     return nullptr;
 }
 
-}  // namespace zhook
+}  // namespace zygisk_framework

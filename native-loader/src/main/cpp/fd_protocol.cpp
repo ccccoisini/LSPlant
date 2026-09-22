@@ -9,7 +9,7 @@
 
 #include "logging.hpp"
 
-namespace zhook {
+namespace zygisk_framework {
 namespace {
 
 struct WireHeader {
@@ -230,7 +230,7 @@ bool ReceiveCompanionResponse(int socket, ProcessState &state) {
     std::vector<int> fds;
     bool fd_receive_ok = RecvFds(socket, header.fd_count, fds);
     if (!fd_receive_ok) {
-        ZH_LOGW(ZH_LOG_TAG_NATIVE, "DEX_FD_RECEIVED code=SCM_RIGHTS_RECEIVE_FAILED");
+        ZYGISK_FRAMEWORK_LOGW(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE, "DEX_FD_RECEIVED code=SCM_RIGHTS_RECEIVE_FAILED");
         fds.clear();
     }
 
@@ -277,4 +277,4 @@ void CloseFd(int &fd) {
     }
 }
 
-}  // namespace zhook
+}  // namespace zygisk_framework

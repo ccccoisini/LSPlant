@@ -14,7 +14,7 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "zygisk-lsplant-framework"
+rootProject.name = "zygisk_framework"
 
 include(":native-loader")
 include(":framework-runtime")

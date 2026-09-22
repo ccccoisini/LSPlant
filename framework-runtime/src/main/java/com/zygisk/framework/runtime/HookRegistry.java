@@ -1,4 +1,4 @@
-package com.example.zygiskhook.runtime;
+package com.zygisk.framework.runtime;
 
 import android.util.Log;
 
@@ -22,7 +22,7 @@ import io.github.libxposed.api.XposedInterface;
 import io.github.libxposed.api.error.HookFailedError;
 
 final class HookRegistry {
-    private static final String TAG = "ZHook.Runtime";
+    private static final String TAG = "zygisk_framework.Runtime";
     private static final Method DISPATCH_METHOD;
 
     static {

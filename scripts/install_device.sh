@@ -7,7 +7,7 @@ if [ "${1:-}" = "--serial" ] && [ -n "${2:-}" ]; then
   SERIAL_ARG=(-s "$2")
 fi
 
-ZIP="$(find "$ROOT_DIR/dist" -maxdepth 1 -name 'zygisk-lsplant-framework-*.zip' -type f -print | sort | tail -n 1)"
+ZIP="$(find "$ROOT_DIR/dist" -maxdepth 1 -name 'zygisk_framework-*.zip' -type f -print | sort | tail -n 1)"
 if [ -z "$ZIP" ] || [ ! -f "$ZIP" ]; then
   echo "Missing generated module zip under $ROOT_DIR/dist; run ./scripts/build_all.sh first." >&2
   exit 1

@@ -9,7 +9,7 @@
 #include "state.hpp"
 #include "target_client.hpp"
 
-namespace zhook {
+namespace zygisk_framework {
 namespace {
 
 std::string JStringToString(JNIEnv *env, jstring value) {
@@ -64,7 +64,7 @@ void CloseProcessState(ProcessState &state) {
 /**
  * Zygisk 模块实现，负责普通 App 进程筛选和 framework.dex 启动。
  */
-class ZygiskHookModule final : public zygisk::ModuleBase {
+class ZygiskFrameworkModule final : public zygisk::ModuleBase {
 public:
     /**
      * 保存 Zygisk API 和初始 JNI 环境。
@@ -113,7 +113,7 @@ public:
         bool ok = LoadFrameworkAndBootstrap(env_, state_, app_loader);
         CloseProcessState(state_);
         if (!ok) {
-            ZH_LOGE(ZH_LOG_TAG_NATIVE, "MODULE_ENTRY_FAILED code=POST_BOOTSTRAP_FAILED");
+            ZYGISK_FRAMEWORK_LOGE(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE, "MODULE_ENTRY_FAILED code=POST_BOOTSTRAP_FAILED");
         }
     }
 
@@ -123,9 +123,9 @@ private:
     ProcessState state_;
 };
 
-}  // namespace zhook
+}  // namespace zygisk_framework
 
 /**
  * 注册 Zygisk 模块入口给 Magisk 调用。
  */
-REGISTER_ZYGISK_MODULE(zhook::ZygiskHookModule)
+REGISTER_ZYGISK_MODULE(zygisk_framework::ZygiskFrameworkModule)

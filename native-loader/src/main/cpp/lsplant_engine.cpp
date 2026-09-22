@@ -9,7 +9,7 @@
 #include "art_symbol_resolver.hpp"
 #include "logging.hpp"
 
-namespace zhook {
+namespace zygisk_framework {
 namespace {
 
 std::once_flag g_init_once;
@@ -31,21 +31,21 @@ bool DobbyInlineUnhook(void *target) {
 bool InitLsplant(JNIEnv *env) {
     std::call_once(g_init_once, [env] {
         long page_size = sysconf(_SC_PAGESIZE);
-        ZH_LOGI(ZH_LOG_TAG_NATIVE, "LSPLANT_INIT_BEGIN page_size=%ld", page_size);
+        ZYGISK_FRAMEWORK_LOGI(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE, "LSPLANT_INIT_BEGIN page_size=%ld", page_size);
         lsplant::InitInfo info;
         info.inline_hooker = DobbyInlineHook;
         info.inline_unhooker = DobbyInlineUnhook;
         info.art_symbol_resolver = ResolveArtSymbol;
         info.art_symbol_prefix_resolver = ResolveArtSymbolPrefix;
-        info.generated_class_name = "ZHookGenerated_";
-        info.generated_source_name = "ZHook";
+        info.generated_class_name = "ZygiskFrameworkGenerated_";
+        info.generated_source_name = "zygisk_framework";
         info.generated_field_name = "hooker";
         info.generated_method_name = "{target}";
         g_init_result = lsplant::Init(env, info);
         if (g_init_result) {
-            ZH_LOGI(ZH_LOG_TAG_NATIVE, "LSPLANT_INIT_OK");
+            ZYGISK_FRAMEWORK_LOGI(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE, "LSPLANT_INIT_OK");
         } else {
-            ZH_LOGE(ZH_LOG_TAG_NATIVE, "LSPLANT_INIT_FAILED code=INIT_RETURN_FALSE");
+            ZYGISK_FRAMEWORK_LOGE(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE, "LSPLANT_INIT_FAILED code=INIT_RETURN_FALSE");
         }
     });
     return g_init_result;
@@ -73,4 +73,4 @@ bool DeoptimizeJavaMethod(JNIEnv *env, jobject executable) {
     return lsplant::Deoptimize(env, executable);
 }
 
-}  // namespace zhook
+}  // namespace zygisk_framework

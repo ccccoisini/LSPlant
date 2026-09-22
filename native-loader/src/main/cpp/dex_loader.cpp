@@ -18,7 +18,7 @@
 #include "jni_bridge.hpp"
 #include "logging.hpp"
 
-namespace zhook {
+namespace zygisk_framework {
 namespace {
 
 constexpr uint32_t kDexEndianConstant = 0x12345678;
@@ -65,7 +65,7 @@ bool ClearJniException(JNIEnv *env, const char *context) {
     }
     env->ExceptionDescribe();
     env->ExceptionClear();
-    ZH_LOGE(ZH_LOG_TAG_NATIVE, "JNI_EXCEPTION context=%s", context);
+    ZYGISK_FRAMEWORK_LOGE(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE, "JNI_EXCEPTION context=%s", context);
     return true;
 }
 
@@ -173,7 +173,7 @@ std::vector<std::string> CollectDexClassNames(const MappedDex &mapping) {
     std::vector<std::string> class_names;
 
     if (dex_len < kDexHeaderSize || !HasDexMagic(dex, dex_len)) {
-        ZH_LOGW(ZH_LOG_TAG_NATIVE, "DEX_VERIFY_FAILED code=CLASS_SCAN_HEADER_INVALID");
+        ZYGISK_FRAMEWORK_LOGW(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE, "DEX_VERIFY_FAILED code=CLASS_SCAN_HEADER_INVALID");
         return class_names;
     }
 
@@ -185,7 +185,7 @@ std::vector<std::string> CollectDexClassNames(const MappedDex &mapping) {
         !ReadDexU32(dex, dex_len, 0x28, &endian_tag) ||
         header_size < kDexHeaderSize || file_size < header_size ||
         file_size > dex_len || endian_tag != kDexEndianConstant) {
-        ZH_LOGW(ZH_LOG_TAG_NATIVE, "DEX_VERIFY_FAILED code=CLASS_SCAN_LAYOUT_INVALID");
+        ZYGISK_FRAMEWORK_LOGW(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE, "DEX_VERIFY_FAILED code=CLASS_SCAN_LAYOUT_INVALID");
         return class_names;
     }
 
@@ -205,7 +205,7 @@ std::vector<std::string> CollectDexClassNames(const MappedDex &mapping) {
         !DexRangeOk(parse_len, string_ids_off, string_ids_size, kDexStringIdSize) ||
         !DexRangeOk(parse_len, type_ids_off, type_ids_size, kDexTypeIdSize) ||
         !DexRangeOk(parse_len, class_defs_off, class_defs_size, kDexClassDefSize)) {
-        ZH_LOGW(ZH_LOG_TAG_NATIVE, "DEX_VERIFY_FAILED code=CLASS_SCAN_TABLE_INVALID");
+        ZYGISK_FRAMEWORK_LOGW(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE, "DEX_VERIFY_FAILED code=CLASS_SCAN_TABLE_INVALID");
         return class_names;
     }
 
@@ -372,7 +372,7 @@ jfieldID GetPathListField(JNIEnv *env, jobject class_loader) {
     }
     if (!env->IsInstanceOf(class_loader, base_loader_class)) {
         env->DeleteLocalRef(base_loader_class);
-        ZH_LOGE(ZH_LOG_TAG_NATIVE, "DEX_VERIFY_FAILED code=CLASSLOADER_NOT_BASE_DEX");
+        ZYGISK_FRAMEWORK_LOGE(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE, "DEX_VERIFY_FAILED code=CLASSLOADER_NOT_BASE_DEX");
         return nullptr;
     }
     jfieldID field = env->GetFieldID(
@@ -535,7 +535,7 @@ jobject CreatePathClassLoaderWithElements(JNIEnv *env, jobject parent, jobjectAr
 
     if (!SetDexElements(env, loader, dex_elements)) {
         env->DeleteLocalRef(loader);
-        ZH_LOGE(ZH_LOG_TAG_NATIVE, "DEX_VERIFY_FAILED code=%s", patch_failure_code);
+        ZYGISK_FRAMEWORK_LOGE(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE, "DEX_VERIFY_FAILED code=%s", patch_failure_code);
         return nullptr;
     }
     return loader;
@@ -580,7 +580,7 @@ bool MountDexElements(JNIEnv *env, jobject class_loader, jobjectArray injected_e
     patch.path_list = path_list;
     patch.dex_elements_field = dex_elements_field;
     patch.original_elements = original_elements;
-    ZH_LOGI(ZH_LOG_TAG_NATIVE, "DEX_ELEMENTS_MOUNTED");
+    ZYGISK_FRAMEWORK_LOGI(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE, "DEX_ELEMENTS_MOUNTED");
     return true;
 }
 
@@ -599,7 +599,7 @@ bool RestoreDexElements(JNIEnv *env, DexElementsPatch &patch) {
     if (failed) {
         return false;
     }
-    ZH_LOGI(ZH_LOG_TAG_NATIVE, "DEX_ELEMENTS_RESTORED");
+    ZYGISK_FRAMEWORK_LOGI(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE, "DEX_ELEMENTS_RESTORED");
     return true;
 }
 
@@ -631,7 +631,7 @@ bool PreloadDexClasses(JNIEnv *env, const MappedDex &mapping, jobject class_load
                 class_class, for_name, class_name, JNI_FALSE, class_loader);
         env->DeleteLocalRef(class_name);
         if (ClearJniException(env, name.c_str()) || clazz == nullptr) {
-            ZH_LOGW(ZH_LOG_TAG_NATIVE, "DEX_PRELOAD_CLASS_FAILED class=%s", name.c_str());
+            ZYGISK_FRAMEWORK_LOGW(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE, "DEX_PRELOAD_CLASS_FAILED class=%s", name.c_str());
             ++failed;
             continue;
         }
@@ -639,11 +639,11 @@ bool PreloadDexClasses(JNIEnv *env, const MappedDex &mapping, jobject class_load
     }
     env->DeleteLocalRef(class_class);
     if (failed != 0) {
-        ZH_LOGW(ZH_LOG_TAG_NATIVE, "DEX_PRELOAD_PARTIAL loaded=%zu total=%zu",
+        ZYGISK_FRAMEWORK_LOGW(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE, "DEX_PRELOAD_PARTIAL loaded=%zu total=%zu",
                 class_names.size() - failed, class_names.size());
         return false;
     }
-    ZH_LOGI(ZH_LOG_TAG_NATIVE, "DEX_PRELOAD_OK classes=%zu", class_names.size());
+    ZYGISK_FRAMEWORK_LOGI(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE, "DEX_PRELOAD_OK classes=%zu", class_names.size());
     return true;
 }
 
@@ -675,15 +675,15 @@ jobjectArray NewStringArray(JNIEnv *env, const std::vector<std::string> &values)
 
 MappedDex EmbeddedFrameworkDex() {
     return {
-            const_cast<uint8_t *>(zhook_generated::framework_dex::kBytes),
-            zhook_generated::framework_dex::kSize,
+            const_cast<uint8_t *>(zygisk_framework_generated::framework_dex::kBytes),
+            zygisk_framework_generated::framework_dex::kSize,
     };
 }
 
 std::string EmbeddedFrameworkMappingText() {
     return {
-            reinterpret_cast<const char *>(zhook_generated::framework_mapping::kBytes),
-            zhook_generated::framework_mapping::kSize,
+            reinterpret_cast<const char *>(zygisk_framework_generated::framework_mapping::kBytes),
+            zygisk_framework_generated::framework_mapping::kSize,
     };
 }
 
@@ -696,13 +696,13 @@ bool PreloadDexIntoClassLoader(JNIEnv *env, jobject dex_buffer, jobject class_lo
     void *data = env->GetDirectBufferAddress(dex_buffer);
     jlong capacity = env->GetDirectBufferCapacity(dex_buffer);
     if (ClearJniException(env, "DirectByteBuffer access") || data == nullptr || capacity <= 0) {
-        ZH_LOGE(ZH_LOG_TAG_NATIVE, "DEX_VERIFY_FAILED code=MODULE_BUFFER_NOT_DIRECT");
+        ZYGISK_FRAMEWORK_LOGE(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE, "DEX_VERIFY_FAILED code=MODULE_BUFFER_NOT_DIRECT");
         return false;
     }
 
     MappedDex mapping{data, static_cast<size_t>(capacity)};
     if (!HasDexMagic(mapping.data, mapping.size) || mapping.size > 32 * 1024 * 1024) {
-        ZH_LOGE(ZH_LOG_TAG_NATIVE, "DEX_VERIFY_FAILED code=MODULE_DEX_INVALID");
+        ZYGISK_FRAMEWORK_LOGE(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE, "DEX_VERIFY_FAILED code=MODULE_DEX_INVALID");
         return false;
     }
 
@@ -715,14 +715,14 @@ bool PreloadDexIntoClassLoader(JNIEnv *env, jobject dex_buffer, jobject class_lo
         env->DeleteLocalRef(injected_elements);
     }
     if (!mounted) {
-        ZH_LOGE(ZH_LOG_TAG_NATIVE, "DEX_VERIFY_FAILED code=MODULE_DEX_ELEMENTS_MOUNT_FAILED");
+        ZYGISK_FRAMEWORK_LOGE(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE, "DEX_VERIFY_FAILED code=MODULE_DEX_ELEMENTS_MOUNT_FAILED");
         return false;
     }
 
     bool preload_ok = PreloadDexClasses(env, mapping, class_loader);
     bool restore_ok = RestoreDexElements(env, patch);
     if (!restore_ok) {
-        ZH_LOGE(ZH_LOG_TAG_NATIVE, "DEX_VERIFY_FAILED code=MODULE_DEX_ELEMENTS_RESTORE_FAILED");
+        ZYGISK_FRAMEWORK_LOGE(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE, "DEX_VERIFY_FAILED code=MODULE_DEX_ELEMENTS_RESTORE_FAILED");
     }
     return preload_ok && restore_ok;
 }
@@ -739,20 +739,20 @@ jobject CreateDexClassLoader(JNIEnv *env, jobject dex_buffer, jobject parent) {
     void *data = env->GetDirectBufferAddress(dex_buffer);
     jlong capacity = env->GetDirectBufferCapacity(dex_buffer);
     if (ClearJniException(env, "DirectByteBuffer access") || data == nullptr || capacity <= 0) {
-        ZH_LOGE(ZH_LOG_TAG_NATIVE, "DEX_VERIFY_FAILED code=MODULE_BUFFER_NOT_DIRECT");
+        ZYGISK_FRAMEWORK_LOGE(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE, "DEX_VERIFY_FAILED code=MODULE_BUFFER_NOT_DIRECT");
         return nullptr;
     }
 
     MappedDex mapping{data, static_cast<size_t>(capacity)};
     if (!HasDexMagic(mapping.data, mapping.size) || mapping.size > 32 * 1024 * 1024) {
-        ZH_LOGE(ZH_LOG_TAG_NATIVE, "DEX_VERIFY_FAILED code=MODULE_DEX_INVALID");
+        ZYGISK_FRAMEWORK_LOGE(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE, "DEX_VERIFY_FAILED code=MODULE_DEX_INVALID");
         return nullptr;
     }
 
     std::vector<MappedDex> mappings{mapping};
     jobjectArray dex_elements = MakeInMemoryDexElements(env, mappings);
     if (dex_elements == nullptr) {
-        ZH_LOGE(ZH_LOG_TAG_NATIVE, "DEX_VERIFY_FAILED code=MODULE_DEX_ELEMENTS_CREATE_FAILED");
+        ZYGISK_FRAMEWORK_LOGE(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE, "DEX_VERIFY_FAILED code=MODULE_DEX_ELEMENTS_CREATE_FAILED");
         return nullptr;
     }
 
@@ -781,25 +781,25 @@ jobject CreateDexClassLoader(JNIEnv *env, jobject dex_buffer, jobject parent) {
     if (!SetDexElements(env, module_loader, dex_elements)) {
         env->DeleteLocalRef(dex_elements);
         env->DeleteLocalRef(module_loader);
-        ZH_LOGE(ZH_LOG_TAG_NATIVE, "DEX_VERIFY_FAILED code=MODULE_CLASSLOADER_PATCH_FAILED");
+        ZYGISK_FRAMEWORK_LOGE(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE, "DEX_VERIFY_FAILED code=MODULE_CLASSLOADER_PATCH_FAILED");
         return nullptr;
     }
     env->DeleteLocalRef(dex_elements);
 
     if (!PreloadDexClasses(env, mapping, module_loader)) {
         env->DeleteLocalRef(module_loader);
-        ZH_LOGE(ZH_LOG_TAG_NATIVE, "DEX_VERIFY_FAILED code=MODULE_PRELOAD_FAILED");
+        ZYGISK_FRAMEWORK_LOGE(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE, "DEX_VERIFY_FAILED code=MODULE_PRELOAD_FAILED");
         return nullptr;
     }
 
-    ZH_LOGI(ZH_LOG_TAG_NATIVE, "MODULE_CLASSLOADER_READY");
+    ZYGISK_FRAMEWORK_LOGI(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE, "MODULE_CLASSLOADER_READY");
     return module_loader;
 }
 
 bool LoadFrameworkAndBootstrap(JNIEnv *env, ProcessState &state, jobject app_class_loader) {
     MappedDex framework_mapping = EmbeddedFrameworkDex();
     if (!HasDexMagic(framework_mapping.data, framework_mapping.size)) {
-        ZH_LOGE(ZH_LOG_TAG_NATIVE, "DEX_VERIFY_FAILED code=FRAMEWORK_DEX_INVALID");
+        ZYGISK_FRAMEWORK_LOGE(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE, "DEX_VERIFY_FAILED code=FRAMEWORK_DEX_INVALID");
         return false;
     }
     auto class_mapping = ParseMapping(EmbeddedFrameworkMappingText());
@@ -807,14 +807,14 @@ bool LoadFrameworkAndBootstrap(JNIEnv *env, ProcessState &state, jobject app_cla
     jobject parent = SystemClassLoader(env);
     jobject host_loader = app_class_loader == nullptr ? parent : app_class_loader;
     if (host_loader == nullptr) {
-        ZH_LOGE(ZH_LOG_TAG_NATIVE, "DEX_VERIFY_FAILED code=HOST_CLASSLOADER_MISSING");
+        ZYGISK_FRAMEWORK_LOGE(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE, "DEX_VERIFY_FAILED code=HOST_CLASSLOADER_MISSING");
         return false;
     }
 
     std::vector<MappedDex> framework_mappings{framework_mapping};
     jobjectArray framework_elements = MakeInMemoryDexElements(env, framework_mappings);
     if (framework_elements == nullptr) {
-        ZH_LOGE(ZH_LOG_TAG_NATIVE, "DEX_VERIFY_FAILED code=FRAMEWORK_DEX_ELEMENTS_CREATE_FAILED");
+        ZYGISK_FRAMEWORK_LOGE(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE, "DEX_VERIFY_FAILED code=FRAMEWORK_DEX_ELEMENTS_CREATE_FAILED");
         return false;
     }
     jobject framework_loader = CreatePathClassLoaderWithElements(
@@ -824,19 +824,19 @@ bool LoadFrameworkAndBootstrap(JNIEnv *env, ProcessState &state, jobject app_cla
         return false;
     }
     PersistentClassLoaders().push_back(env->NewGlobalRef(framework_loader));
-    ZH_LOGI(ZH_LOG_TAG_NATIVE, "FRAMEWORK_CLASSLOADER_READY");
+    ZYGISK_FRAMEWORK_LOGI(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE, "FRAMEWORK_CLASSLOADER_READY");
 
     bool result = false;
     do {
         if (!PreloadDexClasses(env, framework_mapping, framework_loader)) {
-            ZH_LOGE(ZH_LOG_TAG_NATIVE, "DEX_VERIFY_FAILED code=FRAMEWORK_PRELOAD_FAILED");
+            ZYGISK_FRAMEWORK_LOGE(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE, "DEX_VERIFY_FAILED code=FRAMEWORK_PRELOAD_FAILED");
             break;
         }
 
         std::string native_bridge_name =
-                MapClassName(class_mapping, "com.example.zygiskhook.runtime.NativeBridge");
+                MapClassName(class_mapping, "com.zygisk.framework.runtime.NativeBridge");
         std::string bootstrap_name =
-                MapClassName(class_mapping, "com.example.zygiskhook.runtime.RuntimeBootstrap");
+                MapClassName(class_mapping, "com.zygisk.framework.runtime.RuntimeBootstrap");
 
         jclass native_bridge = LoadClass(env, framework_loader, native_bridge_name);
         if (!RegisterNativeBridge(env, native_bridge)) {
@@ -844,7 +844,7 @@ bool LoadFrameworkAndBootstrap(JNIEnv *env, ProcessState &state, jobject app_cla
         }
         jclass bootstrap_class = LoadClass(env, framework_loader, bootstrap_name);
         if (bootstrap_class == nullptr) {
-            ZH_LOGE(ZH_LOG_TAG_NATIVE, "DEX_VERIFY_FAILED code=BOOTSTRAP_CLASS_NOT_FOUND");
+            ZYGISK_FRAMEWORK_LOGE(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE, "DEX_VERIFY_FAILED code=BOOTSTRAP_CLASS_NOT_FOUND");
             break;
         }
 
@@ -859,7 +859,7 @@ bool LoadFrameworkAndBootstrap(JNIEnv *env, ProcessState &state, jobject app_cla
                     ? MapDexFd(module.dex_fd, module_mapping)
                     : MapDexBytes(module.dex_bytes, module_mapping);
             if (!module_ok) {
-                ZH_LOGE(ZH_LOG_TAG_NATIVE, "DEX_VERIFY_FAILED code=MODULE_DEX_INVALID id=%s",
+                ZYGISK_FRAMEWORK_LOGE(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE, "DEX_VERIFY_FAILED code=MODULE_DEX_INVALID id=%s",
                         module.module_id.c_str());
                 continue;
             }
@@ -876,7 +876,7 @@ bool LoadFrameworkAndBootstrap(JNIEnv *env, ProcessState &state, jobject app_cla
                 "(Ljava/lang/ClassLoader;Ljava/lang/String;Ljava/lang/String;[Ljava/lang/String;"
                 "[Ljava/nio/ByteBuffer;[Ljava/lang/String;[Ljava/lang/String;[Ljava/lang/String;)V");
         if (bootstrap == nullptr || ClearJniException(env, "RuntimeBootstrap.bootstrap lookup")) {
-            ZH_LOGE(ZH_LOG_TAG_NATIVE, "DEX_VERIFY_FAILED code=BOOTSTRAP_METHOD_NOT_FOUND");
+            ZYGISK_FRAMEWORK_LOGE(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE, "DEX_VERIFY_FAILED code=BOOTSTRAP_METHOD_NOT_FOUND");
             break;
         }
         jstring process = env->NewStringUTF(state.process_name.c_str());
@@ -895,7 +895,7 @@ bool LoadFrameworkAndBootstrap(JNIEnv *env, ProcessState &state, jobject app_cla
         env->DeleteLocalRef(process);
         env->DeleteLocalRef(package);
         if (ClearJniException(env, "RuntimeBootstrap.bootstrap")) {
-            ZH_LOGE(ZH_LOG_TAG_NATIVE, "MODULE_ENTRY_FAILED code=BOOTSTRAP_EXCEPTION");
+            ZYGISK_FRAMEWORK_LOGE(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE, "MODULE_ENTRY_FAILED code=BOOTSTRAP_EXCEPTION");
             break;
         }
         result = true;
@@ -903,10 +903,10 @@ bool LoadFrameworkAndBootstrap(JNIEnv *env, ProcessState &state, jobject app_cla
 
     if (result) {
         // Host dexElements are left intact because framework.dex lives in its own loader.
-        ZH_LOGI(ZH_LOG_TAG_NATIVE, "DEX_ELEMENTS_RESTORED");
+        ZYGISK_FRAMEWORK_LOGI(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE, "DEX_ELEMENTS_RESTORED");
     }
     env->DeleteLocalRef(framework_loader);
     return result;
 }
 
-}  // namespace zhook
+}  // namespace zygisk_framework

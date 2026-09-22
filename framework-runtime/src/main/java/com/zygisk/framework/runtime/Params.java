@@ -1,4 +1,4 @@
-package com.example.zygiskhook.runtime;
+package com.zygisk.framework.runtime;
 
 import android.app.AppComponentFactory;
 import android.content.pm.ApplicationInfo;

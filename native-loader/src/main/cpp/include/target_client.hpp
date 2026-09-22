@@ -5,7 +5,7 @@
 #include "state.hpp"
 #include "zygisk.hpp"
 
-namespace zhook {
+namespace zygisk_framework {
 
 /**
  * 从 Zygisk Root Companion 查询当前进程是否需要注入。
@@ -17,4 +17,4 @@ namespace zhook {
  */
 bool QueryCompanion(zygisk::Api *api, const std::string &process_name, ProcessState &state);
 
-}  // namespace zhook
+}  // namespace zygisk_framework

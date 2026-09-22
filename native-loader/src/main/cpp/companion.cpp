@@ -15,11 +15,11 @@
 #include "logging.hpp"
 #include "zygisk.hpp"
 
-namespace zhook {
+namespace zygisk_framework {
 namespace {
 
-constexpr const char *kTargetPath = "/data/adb/hook/target.txt";
-constexpr const char *kHookModulesDir = "/data/adb/hook/modules";
+constexpr const char *kTargetPath = "/data/adb/zygisk_framework/target.txt";
+constexpr const char *kHookModulesDir = "/data/adb/zygisk_framework/modules";
 constexpr size_t kMaxTargetFileSize = 64 * 1024;
 constexpr size_t kMaxLineSize = 512;
 constexpr size_t kMaxDexSize = 32 * 1024 * 1024;
@@ -51,14 +51,14 @@ std::set<std::string> LoadTargetRules() {
     std::string content;
     std::set<std::string> rules;
     if (!ReadSmallFile(kTargetPath, kMaxTargetFileSize, content)) {
-        ZH_LOGE(ZH_LOG_TAG_COMPANION, "TARGET_CONFIG_ERROR code=READ_FAILED path=%s", kTargetPath);
+        ZYGISK_FRAMEWORK_LOGE(ZYGISK_FRAMEWORK_LOG_TAG_COMPANION, "TARGET_CONFIG_ERROR code=READ_FAILED path=%s", kTargetPath);
         return rules;
     }
     std::istringstream stream(content);
     std::string line;
     while (std::getline(stream, line)) {
         if (line.size() > kMaxLineSize) {
-            ZH_LOGE(ZH_LOG_TAG_COMPANION, "TARGET_CONFIG_ERROR code=LINE_TOO_LONG");
+            ZYGISK_FRAMEWORK_LOGE(ZYGISK_FRAMEWORK_LOG_TAG_COMPANION, "TARGET_CONFIG_ERROR code=LINE_TOO_LONG");
             continue;
         }
         std::string rule = Trim(line);
@@ -67,7 +67,7 @@ std::set<std::string> LoadTargetRules() {
         }
         rules.insert(rule);
     }
-    ZH_LOGI(ZH_LOG_TAG_COMPANION, "TARGET_CONFIG_LOADED count=%zu", rules.size());
+    ZYGISK_FRAMEWORK_LOGI(ZYGISK_FRAMEWORK_LOG_TAG_COMPANION, "TARGET_CONFIG_LOADED count=%zu", rules.size());
     return rules;
 }
 
@@ -83,7 +83,7 @@ bool IsTargetProcess(const std::string &process_name) {
     auto rules = LoadTargetRules();
     for (const auto &rule : rules) {
         if (MatchesRule(process_name, rule)) {
-            ZH_LOGI(ZH_LOG_TAG_COMPANION, "TARGET_MATCH process=%s", process_name.c_str());
+            ZYGISK_FRAMEWORK_LOGI(ZYGISK_FRAMEWORK_LOG_TAG_COMPANION, "TARGET_MATCH process=%s", process_name.c_str());
             return true;
         }
     }
@@ -132,7 +132,7 @@ void LoadModules(ProcessState &state) {
         module.dex_fd = OpenSafeFile(module_dir + "/module.dex", kMaxDexSize);
         if (module.dex_fd < 0 || !ReadMetadata(module_dir, module)) {
             CloseFd(module.dex_fd);
-            ZH_LOGE(ZH_LOG_TAG_COMPANION, "MODULE_ENTRY_FAILED code=MODULE_FILE_INVALID id=%s",
+            ZYGISK_FRAMEWORK_LOGE(ZYGISK_FRAMEWORK_LOG_TAG_COMPANION, "MODULE_ENTRY_FAILED code=MODULE_FILE_INVALID id=%s",
                     module_id.c_str());
             continue;
         }
@@ -167,19 +167,19 @@ void CompanionHandler(int socket) {
     bool sent = SendMatchResponse(socket, state);
     CloseState(state);
     if (!sent) {
-        ZH_LOGE(ZH_LOG_TAG_COMPANION, "TARGET_CONFIG_ERROR code=RESPONSE_SEND_FAILED");
+        ZYGISK_FRAMEWORK_LOGE(ZYGISK_FRAMEWORK_LOG_TAG_COMPANION, "TARGET_CONFIG_ERROR code=RESPONSE_SEND_FAILED");
     }
 }
 
-}  // namespace zhook
+}  // namespace zygisk_framework
 
 /**
  * Zygisk Root Companion 入口，负责读取 root-only 配置并传递模块 DEX。
  *
  * @param socket 与目标进程相连的 Unix domain socket
  */
-static void zhook_companion_entry(int socket) {
-    zhook::CompanionHandler(socket);
+static void zygisk_framework_companion_entry(int socket) {
+    zygisk_framework::CompanionHandler(socket);
 }
 
-REGISTER_ZYGISK_COMPANION(zhook_companion_entry)
+REGISTER_ZYGISK_COMPANION(zygisk_framework_companion_entry)

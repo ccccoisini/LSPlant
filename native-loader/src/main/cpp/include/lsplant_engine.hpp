@@ -4,7 +4,7 @@
 
 #include <string>
 
-namespace zhook {
+namespace zygisk_framework {
 
 /**
  * 初始化 LSPlant，并配置 Dobby inline hook 后端。
@@ -52,4 +52,4 @@ bool IsJavaMethodHooked(JNIEnv *env, jobject executable);
  */
 bool DeoptimizeJavaMethod(JNIEnv *env, jobject executable);
 
-}  // namespace zhook
+}  // namespace zygisk_framework

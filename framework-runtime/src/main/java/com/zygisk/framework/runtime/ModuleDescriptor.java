@@ -1,4 +1,4 @@
-package com.example.zygiskhook.runtime;
+package com.zygisk.framework.runtime;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;

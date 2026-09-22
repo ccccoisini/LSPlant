@@ -6,7 +6,7 @@
 
 #include "state.hpp"
 
-namespace zhook {
+namespace zygisk_framework {
 
 constexpr uint32_t kProtocolMagic = 0x5a484b31;
 constexpr uint32_t kProtocolVersion = 2;
@@ -58,4 +58,4 @@ bool SendMatchResponse(int socket, const ProcessState &state);
  */
 bool ReceiveProcessQuery(int socket, std::string &process_name);
 
-}  // namespace zhook
+}  // namespace zygisk_framework

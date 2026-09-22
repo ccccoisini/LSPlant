@@ -14,7 +14,7 @@
 ./scripts/build_all.sh
 ```
 
-脚本会执行完整检查、单元测试、DEX 混淆、Native 编译，并最终生成可直接安装的 Magisk/KernelSU 模块 ZIP：`dist/zygisk-lsplant-framework-<version>.zip`。结束前脚本会用 `unzip -t` 校验 ZIP 可读，并打印 SHA-256。
+脚本会执行完整检查、单元测试、DEX 混淆、Native 编译，并最终生成可直接安装的 Magisk/KernelSU 模块 ZIP：`dist/zygisk_framework-<version>.zip`。结束前脚本会用 `unzip -t` 校验 ZIP 可读，并打印 SHA-256。
 
 `scripts/build_all.sh` 会在编译前校验固定的 LSPlant commit，并自动判断 `third_party/patches/lsplant/*.patch` 是待应用、已应用还是与源码不兼容。当前仅保留 `android15-reflection-shorty.patch`，用于兼容 Android 15/厂商 ART 缺少 `GetMethodShorty`/interpreter bridge 内部符号；不兼容的补丁会立即终止构建，避免静默产出错误模块。
 
@@ -24,21 +24,21 @@ DEX 混淆产物：
 
 - `framework-runtime/build/outputs/framework/framework.dex`
 - `framework-runtime/build/outputs/framework/framework.mapping`
-- `native-loader/build/generated/zhook/framework_dex.h`
-- `native-loader/build/generated/zhook/framework_mapping.h`
+- `native-loader/build/generated/zygisk_framework/framework_dex.h`
+- `native-loader/build/generated/zygisk_framework/framework_mapping.h`
 - `demo-hook-module/build/outputs/hook/module.dex`
 - `demo-hook-module/build/outputs/hook/module.mapping`
 - `demo-hook-module/build/outputs/hook/META-INF/xposed/java_init.list`
 
 Native 产物只构建 arm64：
 
-- `native-loader/build/intermediates/cmake/release/obj/arm64-v8a/libzygisk_hook.so`
+- `native-loader/build/intermediates/cmake/release/obj/arm64-v8a/libzygisk_framework.so`
 
-Magisk ZIP 中只包含 `zygisk/*.so`、`hook/modules/*` 和模块元数据；`framework.dex`/`framework.mapping` 仅保留在根 `dist/` 目录用于调试，不再作为运行时文件下发。
+Magisk ZIP 中包含临时 `modules/*` 载荷、`zygisk/*.so` 和模块元数据；安装脚本会将 `modules/*` 复制到 `/data/adb/zygisk_framework/modules/` 后删除模块目录中的临时载荷。`uninstall.sh` 会在卸载时删除该数据目录。`framework.dex`/`framework.mapping` 仅保留在根 `dist/` 目录用于调试，不再作为运行时文件下发。
 
 检查动态依赖：
 
 ```sh
 $ANDROID_HOME/ndk/29.0.14206865/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-readelf -d \
-  native-loader/build/intermediates/cmake/release/obj/arm64-v8a/libzygisk_hook.so
+  native-loader/build/intermediates/cmake/release/obj/arm64-v8a/libzygisk_framework.so
 ```

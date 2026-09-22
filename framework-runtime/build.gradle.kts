@@ -8,15 +8,30 @@ val projectCompileSdk = 35
 val projectMinSdk = 26
 val buildToolsVersionValue = "35.0.0"
 val libxposedApiVersion = rootProject.extra["libxposedApiVersion"] as String
+val frameworkId = rootProject.extra["frameworkId"] as String
+val frameworkName = rootProject.extra["frameworkName"] as String
+val frameworkVersion = rootProject.extra["frameworkVersion"] as String
+val frameworkVersionCode = rootProject.extra["frameworkVersionCode"] as Int
+
+fun buildConfigString(value: String): String =
+    "\"${value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
 
 android {
-    namespace = "com.example.zygiskhook.runtime"
+    namespace = "com.zygisk.framework.runtime"
     compileSdk = projectCompileSdk
     buildToolsVersion = buildToolsVersionValue
+
+    buildFeatures {
+        buildConfig = true
+    }
 
     defaultConfig {
         minSdk = projectMinSdk
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField("String", "FRAMEWORK_ID", buildConfigString(frameworkId))
+        buildConfigField("String", "FRAMEWORK_NAME", buildConfigString(frameworkName))
+        buildConfigField("String", "FRAMEWORK_VERSION", buildConfigString(frameworkVersion))
+        buildConfigField("int", "FRAMEWORK_VERSION_CODE", frameworkVersionCode.toString())
     }
 }
 

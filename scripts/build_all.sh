@@ -39,7 +39,7 @@ fi
 ./gradlew clean
 ./gradlew buildAll
 
-MODULE_ZIP="$(find "$ROOT_DIR/dist" -maxdepth 1 -name 'zygisk-lsplant-framework-*.zip' -type f -print | sort | tail -n 1)"
+MODULE_ZIP="$(find "$ROOT_DIR/dist" -maxdepth 1 -name 'zygisk_framework-*.zip' -type f -print | sort | tail -n 1)"
 if [ -z "$MODULE_ZIP" ] || [ ! -s "$MODULE_ZIP" ]; then
   echo "Missing generated Magisk/KernelSU module zip under $ROOT_DIR/dist" >&2
   exit 1
@@ -71,8 +71,8 @@ reject_zip_entry() {
   fi
 }
 
-require_file "$ROOT_DIR/native-loader/build/generated/zhook/framework_dex.h"
-require_file "$ROOT_DIR/native-loader/build/generated/zhook/framework_mapping.h"
+require_file "$ROOT_DIR/native-loader/build/generated/zygisk_framework/framework_dex.h"
+require_file "$ROOT_DIR/native-loader/build/generated/zygisk_framework/framework_mapping.h"
 require_file "$ROOT_DIR/build/dist-work/zygisk/arm64-v8a.so"
 require_file "$ROOT_DIR/dist/build-info.json"
 

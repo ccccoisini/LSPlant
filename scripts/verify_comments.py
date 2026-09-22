@@ -9,7 +9,7 @@ SKIP_FILES = {"zygisk.hpp"}
 JAVA_TYPE = re.compile(r"^\s*public\s+(?:final\s+|abstract\s+)?(?:class|interface|enum|record)\s+")
 JAVA_MEMBER = re.compile(r"^\s*public\s+[\w<>\[\].?,\s]+\s+\w+\s*\(")
 CPP_HEADER_DECL = re.compile(r"^\s*(?:[\w:<>*&]+\s+)+\w+\s*\([^;{]*\)\s*;")
-CPP_EXPORT = re.compile(r"^\s*(?:JNIEXPORT|extern\s+\"C\"|REGISTER_ZYGISK_|static\s+void\s+zhook_companion_entry)")
+CPP_EXPORT = re.compile(r"^\s*(?:JNIEXPORT|extern\s+\"C\"|REGISTER_ZYGISK_|static\s+void\s+zygisk_framework_companion_entry)")
 CHINESE = re.compile(r"[\u4e00-\u9fff]")
 
 

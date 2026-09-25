@@ -5,3 +5,6 @@
 [submodule "third_party/Dobby"]
 	path = third_party/Dobby
 	url = https://github.com/JingMatrix/Dobby.git
+[submodule "hook_template"]
+	path = hook_template
+	url = https://github.com/ccccoisini/hook_template.git

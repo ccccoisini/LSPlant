@@ -16,7 +16,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "zygisk_framework"
 
-include(":native-loader")
-include(":framework-runtime")
-include(":hook-module-template")
-include(":demo-hook-module")
+include(":native_loader")
+include(":framework_runtime")

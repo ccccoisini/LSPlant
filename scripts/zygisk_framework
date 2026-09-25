@@ -1,0 +1,431 @@
+#!/system/bin/sh
+
+set -u
+umask 022
+LC_ALL=C
+export LC_ALL
+
+BASE_DIR=/data/adb/zygisk_framework
+MODULES_DIR="$BASE_DIR/modules"
+LOCK_DIR="$BASE_DIR/.cli-lock"
+BUSYBOX=
+LOCK_HELD=0
+STAGE_DIR=
+BACKUP_DIR=
+INSTALL_TARGET=
+
+fail() {
+  printf 'zygisk_framework: %s\n' "$*" >&2
+  exit 1
+}
+
+cleanup() {
+  if [ -n "$STAGE_DIR" ] && [ -d "$STAGE_DIR" ]; then
+    "$BUSYBOX" rm -rf "$STAGE_DIR"
+  fi
+  if [ -n "$BACKUP_DIR" ] && [ -d "$BACKUP_DIR" ]; then
+    if [ -n "$INSTALL_TARGET" ] && [ ! -e "$INSTALL_TARGET" ]; then
+      "$BUSYBOX" mv "$BACKUP_DIR" "$INSTALL_TARGET" 2>/dev/null || true
+    else
+      "$BUSYBOX" rm -rf "$BACKUP_DIR"
+    fi
+  fi
+  if [ "$LOCK_HELD" -eq 1 ]; then
+    "$BUSYBOX" rmdir "$LOCK_DIR" 2>/dev/null || true
+  fi
+}
+
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
+
+usage() {
+  cat <<'EOF'
+Usage:
+  zygisk_framework install <module.zip> [--force]
+  zygisk_framework list
+  zygisk_framework info <module-id>
+  zygisk_framework remove <module-id>
+  zygisk_framework enable <module-id>
+  zygisk_framework disable <module-id>
+  zygisk_framework version
+  zygisk_framework help
+
+Module changes apply to newly started processes. Running apps are not stopped.
+EOF
+}
+
+if [ "$(id -u 2>/dev/null || printf 1)" != 0 ]; then
+  fail "must be run as root"
+fi
+
+if [ -x /data/adb/ksu/bin/busybox ]; then
+  BUSYBOX=/data/adb/ksu/bin/busybox
+elif [ -x /data/adb/magisk/busybox ]; then
+  BUSYBOX=/data/adb/magisk/busybox
+else
+  fail "Magisk or KernelSU BusyBox was not found"
+fi
+
+mkdir -p "$MODULES_DIR" || fail "cannot access $MODULES_DIR"
+
+is_valid_id() {
+  case "$1" in
+    [A-Za-z]*) ;;
+    *) return 1 ;;
+  esac
+  case "$1" in
+    *[!A-Za-z0-9._-]*) return 1 ;;
+  esac
+  [ "${#1}" -le 128 ]
+}
+
+get_prop() {
+  "$BUSYBOX" awk -v key="$2" '
+    function trim(value) {
+      sub(/^[ \t\r]+/, "", value)
+      sub(/[ \t\r]+$/, "", value)
+      return value
+    }
+    {
+      line = $0
+      sub(/\r$/, "", line)
+      if (line ~ /^[ \t]*#/ || line ~ /^[ \t]*$/) next
+      separator = index(line, "=")
+      if (separator == 0) next
+      name = trim(substr(line, 1, separator - 1))
+      if (name == key) {
+        count++
+        value = trim(substr(line, separator + 1))
+      }
+    }
+    END {
+      if (count != 1) exit 1
+      print value
+    }
+  ' "$1"
+}
+
+is_positive_int() {
+  case "$1" in
+    ''|*[!0-9]*|0*) return 1 ;;
+  esac
+  [ "${#1}" -le 10 ] || return 1
+  [ "$1" -le 2147483647 ] 2>/dev/null
+}
+
+is_valid_scope_line() {
+  printf '%s\n' "$1" | "$BUSYBOX" grep -Eq '^[A-Za-z0-9_][A-Za-z0-9_.:$-]*$'
+}
+
+trim_line() {
+  printf '%s\n' "$1" | "$BUSYBOX" sed 's/\r$//; s/^[[:space:]]*//; s/[[:space:]]*$//'
+}
+
+is_valid_class_line() {
+  printf '%s\n' "$1" | "$BUSYBOX" grep -Eq '^[A-Za-z_$][A-Za-z0-9_$]*(\.[A-Za-z_$][A-Za-z0-9_$]*)*$'
+}
+
+acquire_lock() {
+  attempt=0
+  while ! mkdir "$LOCK_DIR" 2>/dev/null; do
+    attempt=$((attempt + 1))
+    if [ "$attempt" -ge 30 ]; then
+      fail "another module operation holds the lock: $LOCK_DIR"
+    fi
+    "$BUSYBOX" sleep 1
+  done
+  LOCK_HELD=1
+}
+
+read_installed_id() {
+  is_valid_id "$1" || fail "invalid module id: $1"
+  [ -d "$MODULES_DIR/$1" ] && [ ! -L "$MODULES_DIR/$1" ] || fail "module is not installed or unsafe: $1"
+}
+
+checksum_status() {
+  dir=$1
+  [ -s "$dir/module.dex" ] && [ -s "$dir/module.sha256" ] || {
+    printf 'INVALID (missing DEX or checksum)'
+    return
+  }
+  expected=$("$BUSYBOX" awk 'NR == 1 { print $1; exit }' "$dir/module.sha256")
+  case "$expected" in
+    ''|*[!0123456789abcdefABCDEF]*) printf 'INVALID (malformed checksum)'; return ;;
+  esac
+  [ "${#expected}" -eq 64 ] || {
+    printf 'INVALID (malformed checksum)'
+    return
+  }
+  actual_line=$("$BUSYBOX" sha256sum "$dir/module.dex" 2>/dev/null) || {
+    printf 'INVALID (cannot compute checksum)'
+    return
+  }
+  actual=${actual_line%% *}
+  if [ "$actual" = "$expected" ]; then
+    printf 'OK'
+  else
+    printf 'INVALID (checksum mismatch)'
+  fi
+}
+
+show_module_info() {
+  module_dir=$1
+  prop_file="$module_dir/META-INF/xposed/module.prop"
+  [ -s "$prop_file" ] || fail "module metadata is missing: $module_dir"
+  printf 'id: %s\n' "$(get_prop "$prop_file" id)"
+  printf 'name: %s\n' "$(get_prop "$prop_file" name)"
+  printf 'version: %s\n' "$(get_prop "$prop_file" version)"
+  printf 'versionCode: %s\n' "$(get_prop "$prop_file" versionCode)"
+  printf 'author: %s\n' "$(get_prop "$prop_file" author)"
+  printf 'description: %s\n' "$(get_prop "$prop_file" description)"
+  printf 'minApiVersion: %s\n' "$(get_prop "$prop_file" minApiVersion)"
+  printf 'targetApiVersion: %s\n' "$(get_prop "$prop_file" targetApiVersion)"
+  printf 'staticScope: %s\n' "$(get_prop "$prop_file" staticScope)"
+  printf 'autoHotReload: %s\n' "$(get_prop "$prop_file" autoHotReload)"
+  if [ -e "$module_dir/disabled" ]; then
+    printf 'status: disabled\n'
+  else
+    printf 'status: enabled\n'
+  fi
+  printf 'checksum: %s\n' "$(checksum_status "$module_dir")"
+  printf 'scope:\n'
+  "$BUSYBOX" sed -n '/^[[:space:]]*#/d; /^[[:space:]]*$/d; p' \
+    "$module_dir/META-INF/xposed/scope.list"
+}
+
+extract_member() {
+  archive=$1
+  member=$2
+  output=$3
+  limit=$4
+  "$BUSYBOX" unzip -p "$archive" "$member" 2>/dev/null \
+    | "$BUSYBOX" head -c "$limit" > "$output"
+  [ -s "$output" ]
+}
+
+validate_stage() {
+  prop_file="$STAGE_DIR/META-INF/xposed/module.prop"
+  init_file="$STAGE_DIR/META-INF/xposed/java_init.list"
+  scope_file="$STAGE_DIR/META-INF/xposed/scope.list"
+  [ -s "$prop_file" ] && [ -s "$init_file" ] && [ -s "$scope_file" ] \
+    || fail "module ZIP is missing required metadata"
+
+  for metadata_file in "$init_file" "$prop_file" "$scope_file"; do
+    metadata_size=$("$BUSYBOX" wc -c < "$metadata_file" | "$BUSYBOX" tr -d ' ')
+    [ "$metadata_size" -le 65536 ] || fail "module metadata exceeds 64 KiB"
+  done
+  checksum_size=$("$BUSYBOX" wc -c < "$STAGE_DIR/module.sha256" | "$BUSYBOX" tr -d ' ')
+  [ "$checksum_size" -le 1024 ] || fail "module.sha256 exceeds 1 KiB"
+
+  module_id=$(get_prop "$prop_file" id) || fail "module id is missing or duplicated"
+  is_valid_id "$module_id" || fail "invalid module id: $module_id"
+  module_name=$(get_prop "$prop_file" name) || fail "module name is missing or duplicated"
+  module_version=$(get_prop "$prop_file" version) || fail "module version is missing or duplicated"
+  module_version_code=$(get_prop "$prop_file" versionCode) || fail "versionCode is missing or duplicated"
+  module_author=$(get_prop "$prop_file" author) || fail "author is missing or duplicated"
+  module_description=$(get_prop "$prop_file" description) || fail "description is missing or duplicated"
+  module_min_api=$(get_prop "$prop_file" minApiVersion) || fail "minApiVersion is missing or duplicated"
+  module_target_api=$(get_prop "$prop_file" targetApiVersion) || fail "targetApiVersion is missing or duplicated"
+  module_static_scope=$(get_prop "$prop_file" staticScope) || fail "staticScope is missing or duplicated"
+  module_hot_reload=$(get_prop "$prop_file" autoHotReload) || fail "autoHotReload is missing or duplicated"
+
+  [ -n "$module_name" ] && [ -n "$module_version" ] && [ -n "$module_author" ] \
+    || fail "name, version, and author must be non-empty"
+  is_positive_int "$module_version_code" || fail "versionCode must be a positive 32-bit integer"
+  is_positive_int "$module_min_api" || fail "minApiVersion must be a positive integer"
+  is_positive_int "$module_target_api" || fail "targetApiVersion must be a positive integer"
+  [ "$module_min_api" -le 102 ] && [ "$module_target_api" -ge 102 ] \
+    || fail "module API range must include API 102"
+  case "$module_static_scope:$module_hot_reload" in
+    true:true|true:false|false:true|false:false) ;;
+    *) fail "staticScope and autoHotReload must be true or false" ;;
+  esac
+
+  init_count=0
+  while IFS= read -r line || [ -n "$line" ]; do
+    line=$(trim_line "$line")
+    case "$line" in ''|\#*) continue ;; esac
+    is_valid_class_line "$line" || fail "invalid entry class: $line"
+    init_count=$((init_count + 1))
+  done < "$init_file"
+  [ "$init_count" -gt 0 ] || fail "java_init.list must contain an entry class"
+
+  scope_count=0
+  while IFS= read -r line || [ -n "$line" ]; do
+    line=$(trim_line "$line")
+    case "$line" in ''|\#*) continue ;; esac
+    is_valid_scope_line "$line" || fail "invalid scope target: $line"
+    scope_count=$((scope_count + 1))
+  done < "$scope_file"
+  [ "$scope_count" -gt 0 ] || fail "scope.list must contain at least one target"
+
+  dex_size=$("$BUSYBOX" wc -c < "$STAGE_DIR/module.dex" | "$BUSYBOX" tr -d ' ')
+  [ "$dex_size" -gt 0 ] && [ "$dex_size" -le 33554432 ] \
+    || fail "module.dex must be between 1 byte and 32 MiB"
+  expected=$("$BUSYBOX" awk 'NR == 1 { print $1; exit }' "$STAGE_DIR/module.sha256")
+  case "$expected" in
+    ''|*[!0123456789abcdefABCDEF]*) fail "module.sha256 must contain a SHA-256 digest" ;;
+  esac
+  [ "${#expected}" -eq 64 ] || fail "module.sha256 must contain a SHA-256 digest"
+  actual_line=$("$BUSYBOX" sha256sum "$STAGE_DIR/module.dex") || fail "cannot calculate module checksum"
+  actual=${actual_line%% *}
+  [ "$actual" = "$expected" ] || fail "module.dex checksum does not match module.sha256"
+
+  ARCHIVE_ID=$module_id
+  ARCHIVE_VERSION=$module_version
+  ARCHIVE_VERSION_CODE=$module_version_code
+}
+
+install_module() {
+  [ "$#" -ge 1 ] && [ "$#" -le 2 ] || fail "install expects a ZIP path and optional --force"
+  archive=$1
+  force=0
+  if [ "$#" -eq 2 ]; then
+    [ "$2" = "--force" ] || fail "unknown install option: $2"
+    force=1
+  fi
+  [ -f "$archive" ] || fail "module ZIP not found: $archive"
+  case "$archive" in
+    /*) ;;
+    *) archive="$(pwd)/$archive" ;;
+  esac
+  "$BUSYBOX" unzip -t "$archive" >/dev/null 2>&1 || fail "module ZIP is corrupt or unreadable"
+  acquire_lock
+  STAGE_DIR="$MODULES_DIR/.install.$$"
+  [ ! -e "$STAGE_DIR" ] || fail "temporary install path already exists"
+  mkdir -p "$STAGE_DIR/META-INF/xposed" || fail "cannot create temporary install directory"
+
+  extract_member "$archive" module.dex "$STAGE_DIR/module.dex" 33554433 \
+    || fail "module ZIP is missing module.dex"
+  extract_member "$archive" module.sha256 "$STAGE_DIR/module.sha256" 1024 \
+    || fail "module ZIP is missing module.sha256"
+  extract_member "$archive" META-INF/xposed/java_init.list "$STAGE_DIR/META-INF/xposed/java_init.list" 65537 \
+    || fail "module ZIP is missing java_init.list"
+  extract_member "$archive" META-INF/xposed/module.prop "$STAGE_DIR/META-INF/xposed/module.prop" 65537 \
+    || fail "module ZIP is missing module.prop"
+  extract_member "$archive" META-INF/xposed/scope.list "$STAGE_DIR/META-INF/xposed/scope.list" 65537 \
+    || fail "module ZIP is missing scope.list"
+  validate_stage
+
+  install_target="$MODULES_DIR/$ARCHIVE_ID"
+  if [ -e "$install_target" ]; then
+    [ ! -L "$install_target" ] || fail "installed module directory is a symlink: $ARCHIVE_ID"
+    installed_prop="$install_target/META-INF/xposed/module.prop"
+    [ -s "$installed_prop" ] || fail "installed module metadata is unreadable: $ARCHIVE_ID"
+    installed_version_code=$(get_prop "$installed_prop" versionCode) \
+      || fail "installed module versionCode is invalid: $ARCHIVE_ID"
+    is_positive_int "$installed_version_code" || fail "installed module versionCode is invalid: $ARCHIVE_ID"
+    if [ "$ARCHIVE_VERSION_CODE" -lt "$installed_version_code" ] && [ "$force" -ne 1 ]; then
+      fail "refusing downgrade from $installed_version_code to $ARCHIVE_VERSION_CODE; pass --force"
+    fi
+    if [ -e "$install_target/disabled" ]; then
+      : > "$STAGE_DIR/disabled"
+    fi
+    BACKUP_DIR="$MODULES_DIR/.backup-$ARCHIVE_ID-$$"
+    [ ! -e "$BACKUP_DIR" ] || fail "temporary backup path already exists"
+    INSTALL_TARGET=$install_target
+    "$BUSYBOX" mv "$install_target" "$BACKUP_DIR" || fail "cannot move the installed module"
+  fi
+
+  "$BUSYBOX" chmod 0755 "$STAGE_DIR" "$STAGE_DIR/META-INF" "$STAGE_DIR/META-INF/xposed" \
+    || fail "cannot set module directory permissions"
+  "$BUSYBOX" chmod 0644 "$STAGE_DIR/module.dex" "$STAGE_DIR/module.sha256" \
+    "$STAGE_DIR/META-INF/xposed/java_init.list" "$STAGE_DIR/META-INF/xposed/module.prop" \
+    "$STAGE_DIR/META-INF/xposed/scope.list" || fail "cannot set module file permissions"
+  [ ! -e "$STAGE_DIR/disabled" ] || "$BUSYBOX" chmod 0644 "$STAGE_DIR/disabled" \
+    || fail "cannot set module state permissions"
+  if ! "$BUSYBOX" mv "$STAGE_DIR" "$install_target"; then
+    fail "cannot activate the new module; the previous version will be restored"
+  fi
+  STAGE_DIR=
+  if [ -n "$BACKUP_DIR" ]; then
+    "$BUSYBOX" rm -rf "$BACKUP_DIR"
+    BACKUP_DIR=
+  fi
+  INSTALL_TARGET=
+  printf 'Installed %s %s (versionCode %s).\n' "$ARCHIVE_ID" "$ARCHIVE_VERSION" "$ARCHIVE_VERSION_CODE"
+  printf 'Changes apply to newly started processes; running apps were not stopped.\n'
+}
+
+list_modules() {
+  printf '%-32s %-16s %-10s %s\n' ID VERSION STATUS NAME
+  found=0
+  for module_dir in "$MODULES_DIR"/*; do
+    [ -d "$module_dir" ] && [ ! -L "$module_dir" ] || continue
+    module_id=${module_dir##*/}
+    is_valid_id "$module_id" || continue
+    prop_file="$module_dir/META-INF/xposed/module.prop"
+    [ -s "$prop_file" ] || continue
+    name=$(get_prop "$prop_file" name 2>/dev/null || printf '?')
+    version=$(get_prop "$prop_file" version 2>/dev/null || printf '?')
+    status=enabled
+    [ ! -e "$module_dir/disabled" ] || status=disabled
+    printf '%-32s %-16s %-10s %s\n' "$module_id" "$version" "$status" "$name"
+    found=1
+  done
+  [ "$found" -eq 1 ] || printf '(no modules installed)\n'
+}
+
+remove_module() {
+  [ "$#" -eq 1 ] || fail "remove expects a module id"
+  module_id=$1
+  read_installed_id "$module_id"
+  acquire_lock
+  "$BUSYBOX" rm -rf "$MODULES_DIR/$module_id" || fail "could not remove $module_id"
+  printf 'Removed %s.\n' "$module_id"
+  printf 'Changes apply to newly started processes; running apps were not stopped.\n'
+}
+
+set_module_enabled() {
+  [ "$#" -eq 1 ] || fail "$COMMAND expects a module id"
+  module_id=$1
+  read_installed_id "$module_id"
+  acquire_lock
+  if [ "$COMMAND" = disable ]; then
+    : > "$MODULES_DIR/$module_id/disabled" || fail "could not disable $module_id"
+    "$BUSYBOX" chmod 0644 "$MODULES_DIR/$module_id/disabled"
+    printf 'Disabled %s.\n' "$module_id"
+  else
+    [ ! -e "$MODULES_DIR/$module_id/disabled" ] \
+      || "$BUSYBOX" rm -f "$MODULES_DIR/$module_id/disabled" \
+      || fail "could not enable $module_id"
+    printf 'Enabled %s.\n' "$module_id"
+  fi
+  printf 'Changes apply to newly started processes; running apps were not stopped.\n'
+}
+
+COMMAND=${1:-help}
+shift 2>/dev/null || true
+case "$COMMAND" in
+  help|-h|--help)
+    usage
+    ;;
+  version|--version)
+    printf 'zygisk_framework CLI 0.3.0\n'
+    ;;
+  install)
+    install_module "$@"
+    ;;
+  list)
+    [ "$#" -eq 0 ] || fail "list takes no arguments"
+    list_modules
+    ;;
+  info)
+    [ "$#" -eq 1 ] || fail "info expects a module id"
+    module_id=$1
+    read_installed_id "$module_id"
+    show_module_info "$MODULES_DIR/$module_id"
+    ;;
+  remove)
+    remove_module "$@"
+    ;;
+  enable|disable)
+    set_module_enabled "$@"
+    ;;
+  *)
+    usage >&2
+    fail "unknown command: $COMMAND"
+    ;;
+esac

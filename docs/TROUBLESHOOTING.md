@@ -1,10 +1,10 @@
 # 排错说明
 
-`TARGET_CONFIG_ERROR code=READ_FAILED`：
-检查 `/data/adb/zygisk_framework/target.txt` 是否存在，owner 是否为 root，权限是否为 `0644`。
+没有 `TARGET_MATCH` 或模块未加载：
+检查已启用模块的 `scope.list` 是否命中当前包名/进程名，并用设备 CLI 的 `info <id>` 确认模块状态和 checksum。修改模块状态后重新启动目标应用进程。
 
 `DEX_VERIFY_FAILED code=FRAMEWORK_DEX_INVALID`：
-确认 `./gradlew packageMagiskModule` 已重新执行，且 `native-loader/build/generated/zygisk_framework/framework_dex.h`、`framework_mapping.h` 已由最新 `framework.dex` 生成。当前 Magisk 模块不再要求 `/zygisk/framework.dex` 作为运行时文件。
+确认 `./gradlew packageMagiskModule` 已重新执行，且 `native_loader/build/generated/zygisk_framework/framework_dex.h`、`framework_mapping.h` 已由最新 `framework.dex` 生成。当前 Magisk 模块不再要求 `/zygisk/framework.dex` 作为运行时文件。
 
 `DEX_VERIFY_FAILED code=FRAMEWORK_DEX_ELEMENTS_CREATE_FAILED` 或 `FRAMEWORK_CLASSLOADER_PATCH_FAILED`：
 当前系统隐藏 API `DexPathList.makeInMemoryDexElements` 不可用，或独立 framework ClassLoader 的 `dexElements` 写入失败。收集 `zygisk_framework.Native` 日志确认具体 JNI 异常。
@@ -18,5 +18,5 @@
 `Deoptimize` 返回失败：
 检查日志是否出现 `deoptimize fallback disabled`。这表示当前 ART 未导出 LSPlant 需要的 interpreter bridge/deopt 内部符号，框架会保持 Method Hook 可用，但显式去优化能力不可用。
 
-没有 `DEMO_BEFORE/DEMO_AFTER`：
-确认目标包为 `io.hammer.developmentenvironmentdetection`，`scope.list` 和 `/data/adb/zygisk_framework/target.txt` 都命中该包，并重新 force-stop 后启动 App。
+没有 `TEMPLATE_HOOK_BEFORE/TEMPLATE_HOOK_AFTER`：
+确认模板 `scope.list` 与目标应用包名一致，并重新 force-stop 后启动 App。

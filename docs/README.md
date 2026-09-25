@@ -4,6 +4,7 @@
 
 - [BUILD.md](BUILD.md): 本地构建、打包和产物说明。
 - [MODULE_DEVELOPMENT.md](MODULE_DEVELOPMENT.md): Hook 模块开发约定和模板说明。
+- [CLI_USAGE.md](CLI_USAGE.md): 设备端 CLI 命令、模块安装和管理操作指南。
 - [DEVICE_TEST.md](DEVICE_TEST.md): 真机验证流程。
 - [TROUBLESHOOTING.md](TROUBLESHOOTING.md): 常见问题排查。
 - [COMPATIBILITY.md](COMPATIBILITY.md): Android/ART 兼容性记录。

@@ -71,16 +71,18 @@ reject_zip_entry() {
   fi
 }
 
-require_file "$ROOT_DIR/native-loader/build/generated/zygisk_framework/framework_dex.h"
-require_file "$ROOT_DIR/native-loader/build/generated/zygisk_framework/framework_mapping.h"
+require_file "$ROOT_DIR/native_loader/build/generated/zygisk_framework/framework_dex.h"
+require_file "$ROOT_DIR/native_loader/build/generated/zygisk_framework/framework_mapping.h"
 require_file "$ROOT_DIR/build/dist-work/zygisk/arm64-v8a.so"
 require_file "$ROOT_DIR/dist/build-info.json"
 
 require_zip_entry "zygisk/arm64-v8a.so"
 require_zip_entry "zygisk/build-info.json"
+require_zip_entry "framework_cli/zygisk_framework"
 reject_zip_entry "zygisk/armeabi-v7a.so"
 reject_zip_entry "zygisk/framework.dex"
 reject_zip_entry "zygisk/framework.mapping"
+reject_zip_entry "modules/*"
 
 if ! grep -Fq '"frameworkDelivery": "embedded-native-header"' "$ROOT_DIR/dist/build-info.json"; then
   echo "build-info.json does not record embedded framework delivery" >&2

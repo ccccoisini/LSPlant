@@ -7,16 +7,16 @@ plugins {
 }
 
 val moduleProperties = Properties().apply {
-    file("magisk-module/module.prop").inputStream().use { load(it) }
+    file("magisk_module/module.prop").inputStream().use { load(it) }
 }
 val frameworkId = moduleProperties.getProperty("id")
-    ?: error("magisk-module/module.prop is missing id")
+    ?: error("magisk_module/module.prop is missing id")
 val frameworkName = moduleProperties.getProperty("name")
-    ?: error("magisk-module/module.prop is missing name")
+    ?: error("magisk_module/module.prop is missing name")
 val frameworkVersion = moduleProperties.getProperty("version")
-    ?: error("magisk-module/module.prop is missing version")
+    ?: error("magisk_module/module.prop is missing version")
 val frameworkVersionCode = moduleProperties.getProperty("versionCode")?.toIntOrNull()
-    ?: error("magisk-module/module.prop has an invalid versionCode")
+    ?: error("magisk_module/module.prop has an invalid versionCode")
 val libxposedApiVersion = "102.0.0"
 val compileSdkVersion = 35
 val minSdkVersion = 26
@@ -39,9 +39,8 @@ tasks.register("packageMagiskModule") {
     group = "build"
     description = "打包 Magisk/Zygisk 模块和所有 DEX 产物。"
     dependsOn(
-        ":native-loader:externalNativeBuildRelease",
-        ":framework-runtime:buildFrameworkDex",
-        ":demo-hook-module:buildHookDex"
+        ":native_loader:externalNativeBuildRelease",
+        ":framework_runtime:buildFrameworkDex"
     )
 
     doLast {
@@ -53,20 +52,19 @@ tasks.register("packageMagiskModule") {
                     "build-info.json", "framework.dex", "framework.mapping", "SHA256SUMS",
                     "device-verification-report.txt"))
         } ?: emptyList<File>())
-        delete(File(rootDist, "demo-hook-module"))
         distDir.mkdirs()
         rootDist.mkdirs()
 
         copy {
-            from("magisk-module")
+            from("magisk_module")
             into(distDir)
         }
         copy {
-            from("demo-hook-module/build/outputs/hook")
-            into(File(distDir, "modules/hammer-demo"))
+            from("scripts/zygisk_framework")
+            into(File(distDir, "framework_cli"))
         }
 
-        val soFiles = fileTree("native-loader/build").matching {
+        val soFiles = fileTree("native_loader/build").matching {
             include("**/libzygisk_framework.so")
         }.files
         val abiNames = listOf("arm64-v8a")
@@ -110,16 +108,12 @@ tasks.register("packageMagiskModule") {
         }
 
         copy {
-            from("framework-runtime/build/outputs/framework/framework.dex")
+            from("framework_runtime/build/outputs/framework/framework.dex")
             into(rootDist)
         }
         copy {
-            from("framework-runtime/build/outputs/framework/framework.mapping")
+            from("framework_runtime/build/outputs/framework/framework.mapping")
             into(rootDist)
-        }
-        copy {
-            from("demo-hook-module/build/outputs/hook")
-            into(File(rootDist, "demo-hook-module"))
         }
 
         val checksumFiles = fileTree(rootDist).files
@@ -138,7 +132,7 @@ tasks.register("buildAll") {
     description = "执行注释检查、单元测试、DEX 构建和 Magisk 模块打包。"
     dependsOn(
         "verifyPublicDocumentation",
-        ":framework-runtime:testDebugUnitTest",
+        ":framework_runtime:testDebugUnitTest",
         "packageMagiskModule"
     )
 }

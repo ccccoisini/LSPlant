@@ -7,10 +7,11 @@
 
 #include <algorithm>
 #include <cerrno>
+#include <cctype>
 #include <fstream>
-#include <set>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #include "logging.hpp"
 #include "zygisk.hpp"
@@ -18,10 +19,7 @@
 namespace zygisk_framework {
 namespace {
 
-constexpr const char *kTargetPath = "/data/adb/zygisk_framework/target.txt";
 constexpr const char *kHookModulesDir = "/data/adb/zygisk_framework/modules";
-constexpr size_t kMaxTargetFileSize = 64 * 1024;
-constexpr size_t kMaxLineSize = 512;
 constexpr size_t kMaxDexSize = 32 * 1024 * 1024;
 
 std::string Trim(const std::string &value) {
@@ -47,30 +45,6 @@ bool ReadSmallFile(const std::string &path, size_t max_size, std::string &conten
     return content.size() <= max_size;
 }
 
-std::set<std::string> LoadTargetRules() {
-    std::string content;
-    std::set<std::string> rules;
-    if (!ReadSmallFile(kTargetPath, kMaxTargetFileSize, content)) {
-        ZYGISK_FRAMEWORK_LOGE(ZYGISK_FRAMEWORK_LOG_TAG_COMPANION, "TARGET_CONFIG_ERROR code=READ_FAILED path=%s", kTargetPath);
-        return rules;
-    }
-    std::istringstream stream(content);
-    std::string line;
-    while (std::getline(stream, line)) {
-        if (line.size() > kMaxLineSize) {
-            ZYGISK_FRAMEWORK_LOGE(ZYGISK_FRAMEWORK_LOG_TAG_COMPANION, "TARGET_CONFIG_ERROR code=LINE_TOO_LONG");
-            continue;
-        }
-        std::string rule = Trim(line);
-        if (rule.empty() || rule[0] == '#') {
-            continue;
-        }
-        rules.insert(rule);
-    }
-    ZYGISK_FRAMEWORK_LOGI(ZYGISK_FRAMEWORK_LOG_TAG_COMPANION, "TARGET_CONFIG_LOADED count=%zu", rules.size());
-    return rules;
-}
-
 bool MatchesRule(const std::string &process_name, const std::string &rule) {
     if (process_name == rule) {
         return true;
@@ -79,11 +53,27 @@ bool MatchesRule(const std::string &process_name, const std::string &rule) {
            process_name.rfind(rule + ":", 0) == 0;
 }
 
-bool IsTargetProcess(const std::string &process_name) {
-    auto rules = LoadTargetRules();
-    for (const auto &rule : rules) {
+bool IsValidModuleId(const std::string &module_id) {
+    if (module_id.empty() || !std::isalpha(static_cast<unsigned char>(module_id[0]))) {
+        return false;
+    }
+    return std::all_of(module_id.begin(), module_id.end(), [](unsigned char value) {
+        return std::isalnum(value) || value == '.' || value == '_' || value == '-';
+    });
+}
+
+bool ScopeMatches(const std::string &scope_list, const std::string &process_name) {
+    std::istringstream stream(scope_list);
+    std::string line;
+    while (std::getline(stream, line)) {
+        if (line.size() > 512) {
+            continue;
+        }
+        std::string rule = Trim(line);
+        if (rule.empty() || rule[0] == '#') {
+            continue;
+        }
         if (MatchesRule(process_name, rule)) {
-            ZYGISK_FRAMEWORK_LOGI(ZYGISK_FRAMEWORK_LOG_TAG_COMPANION, "TARGET_MATCH process=%s", process_name.c_str());
             return true;
         }
     }
@@ -121,24 +111,44 @@ void LoadModules(ProcessState &state) {
     if (dir == nullptr) {
         return;
     }
+    std::vector<std::string> module_ids;
     while (dirent *entry = readdir(dir)) {
-        if (entry->d_name[0] == '.') {
+        std::string module_id = entry->d_name;
+        if (module_id[0] == '.' || !IsValidModuleId(module_id)) continue;
+        module_ids.push_back(module_id);
+    }
+    closedir(dir);
+    std::sort(module_ids.begin(), module_ids.end());
+
+    for (const std::string &module_id : module_ids) {
+        std::string module_dir = std::string(kHookModulesDir) + "/" + module_id;
+        struct stat disabled_st {};
+        if (lstat((module_dir + "/disabled").c_str(), &disabled_st) == 0) {
+            ZYGISK_FRAMEWORK_LOGI(ZYGISK_FRAMEWORK_LOG_TAG_COMPANION,
+                    "MODULE_SCOPE_SKIP id=%s reason=DISABLED", module_id.c_str());
             continue;
         }
-        std::string module_id = entry->d_name;
-        std::string module_dir = std::string(kHookModulesDir) + "/" + module_id;
         ModuleDescriptor module;
         module.module_id = module_id;
+        if (!ReadMetadata(module_dir, module)) {
+            ZYGISK_FRAMEWORK_LOGE(ZYGISK_FRAMEWORK_LOG_TAG_COMPANION,
+                    "MODULE_ENTRY_FAILED code=MODULE_FILE_INVALID id=%s", module_id.c_str());
+            continue;
+        }
+        if (!ScopeMatches(module.scope_list, state.process_name)) {
+            continue;
+        }
         module.dex_fd = OpenSafeFile(module_dir + "/module.dex", kMaxDexSize);
-        if (module.dex_fd < 0 || !ReadMetadata(module_dir, module)) {
+        if (module.dex_fd < 0) {
             CloseFd(module.dex_fd);
             ZYGISK_FRAMEWORK_LOGE(ZYGISK_FRAMEWORK_LOG_TAG_COMPANION, "MODULE_ENTRY_FAILED code=MODULE_FILE_INVALID id=%s",
                     module_id.c_str());
             continue;
         }
+        ZYGISK_FRAMEWORK_LOGI(ZYGISK_FRAMEWORK_LOG_TAG_COMPANION,
+                "MODULE_SCOPE_MATCH id=%s process=%s", module_id.c_str(), state.process_name.c_str());
         state.modules.push_back(module);
     }
-    closedir(dir);
 }
 
 void CloseState(ProcessState &state) {
@@ -155,15 +165,16 @@ void CompanionHandler(int socket) {
         SendNoMatchResponse(socket, 1, "bad request");
         return;
     }
-    if (!IsTargetProcess(process_name)) {
+    ProcessState state;
+    state.process_name = process_name;
+    LoadModules(state);
+    if (state.modules.empty()) {
         SendNoMatchResponse(socket, 0, "");
         return;
     }
-
-    ProcessState state;
-    state.process_name = process_name;
     state.target = true;
-    LoadModules(state);
+    ZYGISK_FRAMEWORK_LOGI(ZYGISK_FRAMEWORK_LOG_TAG_COMPANION,
+            "TARGET_MATCH process=%s modules=%zu", process_name.c_str(), state.modules.size());
     bool sent = SendMatchResponse(socket, state);
     CloseState(state);
     if (!sent) {

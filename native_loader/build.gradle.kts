@@ -41,8 +41,8 @@ android {
 val generateFrameworkDexHeader by tasks.registering(Exec::class) {
     group = "build"
     description = "把 framework.dex 导出为 native 编译使用的 C++ header。"
-    dependsOn(":framework-runtime:buildFrameworkDex")
-    val inputDex = rootProject.file("framework-runtime/build/outputs/framework/framework.dex")
+    dependsOn(":framework_runtime:buildFrameworkDex")
+    val inputDex = rootProject.file("framework_runtime/build/outputs/framework/framework.dex")
     val outputHeader = generatedFrameworkDir.map { it.file("framework_dex.h").asFile }
     inputs.file(inputDex)
     outputs.file(outputHeader)
@@ -59,8 +59,8 @@ val generateFrameworkDexHeader by tasks.registering(Exec::class) {
 val generateFrameworkMappingHeader by tasks.registering(Exec::class) {
     group = "build"
     description = "把 framework.mapping 导出为 native 编译使用的 C++ header。"
-    dependsOn(":framework-runtime:buildFrameworkDex")
-    val inputMapping = rootProject.file("framework-runtime/build/outputs/framework/framework.mapping")
+    dependsOn(":framework_runtime:buildFrameworkDex")
+    val inputMapping = rootProject.file("framework_runtime/build/outputs/framework/framework.mapping")
     val outputHeader = generatedFrameworkDir.map { it.file("framework_mapping.h").asFile }
     inputs.file(inputMapping)
     outputs.file(outputHeader)

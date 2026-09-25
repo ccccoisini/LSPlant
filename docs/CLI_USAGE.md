@@ -32,6 +32,11 @@ adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework list'
 zygisk_framework install <module.zip> [--force]
 zygisk_framework list
 zygisk_framework info <module-id>
+zygisk_framework scope <module-id> list
+zygisk_framework scope <module-id> add <target> [target...]
+zygisk_framework scope <module-id> remove <target> [target...]
+zygisk_framework scope <module-id> set <target> [target...]
+zygisk_framework scope <module-id> clear
 zygisk_framework disable <module-id>
 zygisk_framework enable <module-id>
 zygisk_framework remove <module-id>
@@ -45,6 +50,11 @@ zygisk_framework help
 | `install <module.zip> --force` | 允许安装较低 `versionCode` 的版本（强制降级）。 |
 | `list` | 列出已安装模块的 ID、版本、启用状态和名称。 |
 | `info <module-id>` | 查看模块完整元数据、scope 和 DEX checksum 校验结果。 |
+| `scope <module-id> list` | 查看模块当前生效的 scope 目标。 |
+| `scope <module-id> add <target> [...]` | 添加一个或多个目标；已存在的目标不会重复写入。 |
+| `scope <module-id> remove <target> [...]` | 删除一个或多个精确匹配的目标；不存在的目标会提示并跳过。 |
+| `scope <module-id> set <target> [...]` | 用给定目标整体替换当前 scope；至少需要一个目标。 |
+| `scope <module-id> clear` | 清空 scope.list；模块保留安装状态，但不会注入任何新进程。 |
 | `disable <module-id>` | 禁用模块；保留文件，后续新进程不加载该模块。 |
 | `enable <module-id>` | 重新启用已禁用模块。 |
 | `remove <module-id>` | 删除模块及其设备端文件。 |
@@ -52,7 +62,9 @@ zygisk_framework help
 | `help` | 显示命令帮助。 |
 
 `<module-id>` 必须与模块 ZIP 内 `module.prop` 声明的 ID 完全一致，而不是 ZIP 文件名。ID 以英文字母
-开头，后续仅可包含英文字母、数字、点、下划线和连字符，最长 128 个字符。
+开头，后续仅可包含英文字母、数字、点、下划线和连字符，最长 128 个字符。scope 目标必须以英文字母、
+数字或下划线开头，其余字符仅可使用英文字母、数字、下划线、点、冒号、美元符号和连字符，每条最多 512
+个字符。
 
 ## 安装示例
 
@@ -94,6 +106,11 @@ ZIP、缺失元数据、无效 ID、API 范围不兼容或 checksum 不匹配时
 ```sh
 adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework list'
 adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework info example_hook'
+adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework scope example_hook list'
+adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework scope example_hook add io.hammer.developmentenvironmentdetection'
+adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework scope example_hook remove com.example.target'
+adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework scope example_hook set io.hammer.developmentenvironmentdetection'
+adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework scope example_hook clear'
 adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework disable example_hook'
 adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework enable example_hook'
 adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework remove example_hook'
@@ -102,6 +119,11 @@ adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework remove example_
 禁用、启用、安装和删除只影响之后启动的进程；CLI 不会主动结束正在运行的 App。要让变更作用于目标
 应用，请自行停止并重新启动该应用。模块是否会在进程中加载，还取决于 `scope.list` 是否包含该应用包名或
 对应进程名。
+
+scope 目标使用精确包名或进程名。与框架运行时的匹配规则一致：不含冒号的包名也会匹配它的子进程
+（例如 `com.example.app:remote`）；带冒号的进程名只匹配该进程。scope 修改通过同目录临时文件原子替换，
+并与安装、启停、删除操作共用互斥锁。`clear` 会写入空的 `scope.list`，模块仍显示为已启用，但不会匹配
+任何进程；重新安装模块 ZIP 会恢复 ZIP 中携带的 scope。
 
 卸载框架会删除整个 `/data/adb/zygisk_framework` 数据目录，因此设备端 CLI 和已安装的业务模块也会一并
 删除。需要保留模块时，请在卸载框架前备份相应模块 ZIP。

@@ -30,6 +30,6 @@ git submodule update --init hook_template
 ```
 
 产物位于 `dist/`，Magisk 模块为 `dist/zygisk_framework-0.3.0.zip`。业务模块 ZIP
-可通过设备 CLI 的 `install/list/info/remove/enable/disable` 命令管理。
+可通过设备 CLI 的 `install/list/info/scope/remove/enable/disable` 命令管理。
 
 CLI 命令和设备端模块管理方法见[CLI 使用指南](docs/CLI_USAGE.md)。更多文档见 [`docs/`](docs/README.md)。

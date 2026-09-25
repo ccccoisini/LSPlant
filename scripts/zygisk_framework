@@ -13,6 +13,8 @@ LOCK_HELD=0
 STAGE_DIR=
 BACKUP_DIR=
 INSTALL_TARGET=
+SCOPE_TEMP_FILE=
+SCOPE_NEXT_FILE=
 
 fail() {
   printf 'zygisk_framework: %s\n' "$*" >&2
@@ -30,6 +32,12 @@ cleanup() {
       "$BUSYBOX" rm -rf "$BACKUP_DIR"
     fi
   fi
+  if [ -n "$SCOPE_TEMP_FILE" ] && [ -f "$SCOPE_TEMP_FILE" ]; then
+    "$BUSYBOX" rm -f "$SCOPE_TEMP_FILE"
+  fi
+  if [ -n "$SCOPE_NEXT_FILE" ] && [ -f "$SCOPE_NEXT_FILE" ]; then
+    "$BUSYBOX" rm -f "$SCOPE_NEXT_FILE"
+  fi
   if [ "$LOCK_HELD" -eq 1 ]; then
     "$BUSYBOX" rmdir "$LOCK_DIR" 2>/dev/null || true
   fi
@@ -46,6 +54,11 @@ Usage:
   zygisk_framework install <module.zip> [--force]
   zygisk_framework list
   zygisk_framework info <module-id>
+  zygisk_framework scope <module-id> list
+  zygisk_framework scope <module-id> add <target> [target...]
+  zygisk_framework scope <module-id> remove <target> [target...]
+  zygisk_framework scope <module-id> set <target> [target...]
+  zygisk_framework scope <module-id> clear
   zygisk_framework remove <module-id>
   zygisk_framework enable <module-id>
   zygisk_framework disable <module-id>
@@ -116,7 +129,8 @@ is_positive_int() {
 }
 
 is_valid_scope_line() {
-  printf '%s\n' "$1" | "$BUSYBOX" grep -Eq '^[A-Za-z0-9_][A-Za-z0-9_.:$-]*$'
+  [ "${#1}" -le 512 ] \
+    && printf '%s\n' "$1" | "$BUSYBOX" grep -Eq '^[A-Za-z0-9_][A-Za-z0-9_.:$-]*$'
 }
 
 trim_line() {
@@ -168,6 +182,181 @@ checksum_status() {
   else
     printf 'INVALID (checksum mismatch)'
   fi
+}
+
+scope_has_target() {
+  scope_path=$1
+  requested_target=$2
+  while IFS= read -r scope_line || [ -n "$scope_line" ]; do
+    scope_line=$(trim_line "$scope_line")
+    case "$scope_line" in ''|\#*) continue ;; esac
+    [ "$scope_line" = "$requested_target" ] && return 0
+  done < "$scope_path"
+  return 1
+}
+
+validate_scope_file() {
+  scope_path=$1
+  while IFS= read -r scope_line || [ -n "$scope_line" ]; do
+    scope_line=$(trim_line "$scope_line")
+    case "$scope_line" in ''|\#*) continue ;; esac
+    is_valid_scope_line "$scope_line" || fail "invalid existing scope target: $scope_line; use scope set or scope clear to repair it"
+  done < "$scope_path"
+}
+
+normalize_scope_file() {
+  scope_path=$1
+  "$BUSYBOX" awk '
+    function trim(value) {
+      sub(/^[ \t\r]+/, "", value)
+      sub(/[ \t\r]+$/, "", value)
+      return value
+    }
+    {
+      line = trim($0)
+      if (line != "") print line
+    }
+  ' "$scope_path"
+}
+
+show_scope() {
+  scope_path=$1
+  found_scope=0
+  while IFS= read -r scope_line || [ -n "$scope_line" ]; do
+    scope_line=$(trim_line "$scope_line")
+    case "$scope_line" in ''|\#*) continue ;; esac
+    if is_valid_scope_line "$scope_line"; then
+      printf '%s\n' "$scope_line"
+    else
+      printf '(invalid) %s\n' "$scope_line"
+    fi
+    found_scope=1
+  done < "$scope_path"
+  if [ "$found_scope" -eq 0 ]; then
+    printf '(empty; module will not be injected into any process)\n'
+  fi
+}
+
+manage_scope() {
+  [ "$#" -ge 2 ] || fail "scope expects a module id and an operation"
+  module_id=$1
+  operation=$2
+  shift 2
+  is_valid_id "$module_id" || fail "invalid module id: $module_id"
+
+  case "$operation" in
+    list)
+      [ "$#" -eq 0 ] || fail "scope $module_id list takes no targets"
+      read_installed_id "$module_id"
+      metadata_dir="$MODULES_DIR/$module_id/META-INF/xposed"
+      [ -d "$metadata_dir" ] && [ ! -L "$metadata_dir" ] \
+        || fail "module metadata directory is missing or unsafe: $module_id"
+      scope_file="$metadata_dir/scope.list"
+      [ -f "$scope_file" ] && [ ! -L "$scope_file" ] \
+        || fail "module scope.list is missing or unsafe: $module_id"
+      printf 'Scope for %s:\n' "$module_id"
+      show_scope "$scope_file"
+      ;;
+    add|remove|set)
+      [ "$#" -gt 0 ] || fail "scope $operation expects at least one target"
+      for requested_target in "$@"; do
+        is_valid_scope_line "$requested_target" || fail "invalid scope target: $requested_target"
+      done
+      acquire_lock
+      read_installed_id "$module_id"
+      metadata_dir="$MODULES_DIR/$module_id/META-INF/xposed"
+      [ -d "$metadata_dir" ] && [ ! -L "$metadata_dir" ] \
+        || fail "module metadata directory is missing or unsafe: $module_id"
+      scope_file="$metadata_dir/scope.list"
+      [ -f "$scope_file" ] && [ ! -L "$scope_file" ] \
+        || fail "module scope.list is missing or unsafe: $module_id"
+      if [ "$operation" != set ]; then
+        validate_scope_file "$scope_file"
+      fi
+      scope_temp_candidate="$metadata_dir/.scope.list.tmp.$$"
+      scope_next_candidate="$metadata_dir/.scope.list.next.$$"
+      [ ! -e "$scope_temp_candidate" ] && [ ! -L "$scope_temp_candidate" ] \
+        && [ ! -e "$scope_next_candidate" ] && [ ! -L "$scope_next_candidate" ] \
+        || fail "temporary scope file already exists"
+      SCOPE_TEMP_FILE=$scope_temp_candidate
+      SCOPE_NEXT_FILE=$scope_next_candidate
+      if [ "$operation" = set ]; then
+        : > "$SCOPE_TEMP_FILE" || fail "cannot create temporary scope file"
+      else
+        normalize_scope_file "$scope_file" > "$SCOPE_TEMP_FILE" \
+          || fail "cannot read current scope.list"
+      fi
+
+      for requested_target in "$@"; do
+        case "$operation" in
+          add)
+            if scope_has_target "$SCOPE_TEMP_FILE" "$requested_target"; then
+              printf 'Already in scope: %s\n' "$requested_target"
+            else
+              printf '%s\n' "$requested_target" >> "$SCOPE_TEMP_FILE" \
+                || fail "cannot add scope target: $requested_target"
+              printf 'Added scope target: %s\n' "$requested_target"
+            fi
+            ;;
+          remove)
+            if scope_has_target "$SCOPE_TEMP_FILE" "$requested_target"; then
+              "$BUSYBOX" awk -v target="$requested_target" '
+                function trim(value) {
+                  sub(/^[ \t\r]+/, "", value)
+                  sub(/[ \t\r]+$/, "", value)
+                  return value
+                }
+                trim($0) != target { print }
+              ' "$SCOPE_TEMP_FILE" > "$SCOPE_NEXT_FILE" \
+                || fail "cannot remove scope target: $requested_target"
+              "$BUSYBOX" mv "$SCOPE_NEXT_FILE" "$SCOPE_TEMP_FILE" \
+                || fail "cannot update temporary scope file"
+              SCOPE_NEXT_FILE="$metadata_dir/.scope.list.next.$$"
+              printf 'Removed scope target: %s\n' "$requested_target"
+            else
+              printf 'Scope target not present: %s\n' "$requested_target"
+            fi
+            ;;
+          set)
+            if ! scope_has_target "$SCOPE_TEMP_FILE" "$requested_target"; then
+              printf '%s\n' "$requested_target" >> "$SCOPE_TEMP_FILE" \
+                || fail "cannot set scope target: $requested_target"
+            fi
+            ;;
+        esac
+      done
+
+      "$BUSYBOX" chmod 0644 "$SCOPE_TEMP_FILE" || fail "cannot set scope.list permissions"
+      "$BUSYBOX" mv "$SCOPE_TEMP_FILE" "$scope_file" \
+        || fail "cannot atomically replace scope.list"
+      SCOPE_TEMP_FILE=
+      printf 'Scope updated for %s. Changes apply to newly started processes; running apps were not stopped.\n' "$module_id"
+      ;;
+    clear)
+      [ "$#" -eq 0 ] || fail "scope $module_id clear takes no targets"
+      acquire_lock
+      read_installed_id "$module_id"
+      metadata_dir="$MODULES_DIR/$module_id/META-INF/xposed"
+      [ -d "$metadata_dir" ] && [ ! -L "$metadata_dir" ] \
+        || fail "module metadata directory is missing or unsafe: $module_id"
+      scope_file="$metadata_dir/scope.list"
+      [ -f "$scope_file" ] && [ ! -L "$scope_file" ] \
+        || fail "module scope.list is missing or unsafe: $module_id"
+      scope_temp_candidate="$metadata_dir/.scope.list.tmp.$$"
+      [ ! -e "$scope_temp_candidate" ] && [ ! -L "$scope_temp_candidate" ] \
+        || fail "temporary scope file already exists"
+      SCOPE_TEMP_FILE=$scope_temp_candidate
+      : > "$SCOPE_TEMP_FILE" || fail "cannot create temporary scope file"
+      "$BUSYBOX" chmod 0644 "$SCOPE_TEMP_FILE" || fail "cannot set scope.list permissions"
+      "$BUSYBOX" mv "$SCOPE_TEMP_FILE" "$scope_file" \
+        || fail "cannot atomically replace scope.list"
+      SCOPE_TEMP_FILE=
+      printf 'Cleared scope for %s; it will not be injected into any process. Changes apply to newly started processes.\n' "$module_id"
+      ;;
+    *)
+      fail "unknown scope operation: $operation"
+      ;;
+  esac
 }
 
 show_module_info() {
@@ -417,6 +606,9 @@ case "$COMMAND" in
     module_id=$1
     read_installed_id "$module_id"
     show_module_info "$MODULES_DIR/$module_id"
+    ;;
+  scope)
+    manage_scope "$@"
     ;;
   remove)
     remove_module "$@"

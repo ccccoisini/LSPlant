@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <map>
 #include <string>
 #include <vector>
@@ -18,6 +19,7 @@ struct ModuleDescriptor {
     std::string module_prop;
     std::string scope_list;
     std::map<std::string, std::string> remote_preferences;
+    uint32_t remote_preferences_generation = 0;
 };
 
 /**
@@ -27,7 +29,8 @@ struct ProcessState {
     std::string process_name;
     std::string package_name;
     bool target = false;
-    int companion_fd = -1;
+    void *remote_preferences_region = nullptr;
+    size_t remote_preferences_region_size = 0;
     std::vector<ModuleDescriptor> modules;
 };
 

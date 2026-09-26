@@ -91,7 +91,7 @@ adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework install /sdcard
 较低版本默认拒绝，确认需要降级时加 `--force`：
 
 ```sh
-adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework install /sdcard/Download/example_hook-1.0.0.zip --force'
+adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework install /sdcard/Download/example_hook-1.2.0.zip --force'
 ```
 
 ## 模块包校验与安全边界
@@ -124,9 +124,11 @@ adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework prefs example_h
 adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework prefs example_hook settings list'
 ```
 
-写入、删除和清空使用 root-only 临时文件原子替换。已运行的目标进程通过 Root Companion 长连接收到整组
-快照，已注册的 `OnSharedPreferenceChangeListener` 会在框架后台线程收到真正发生变化的键；不需要重启
-应用。连接异常时保留最后一次有效快照，不影响 Hook 主链路。
+写入、删除和清空使用 root-only 临时文件原子替换。目标在 specialize 前创建 memfd，Root Companion
+打开并初始化后，目标仅保留只读映射；后续通过 inotify、完整模块快照和 futex 通知已运行的目标进程，
+不保留 companion socket 或共享内存 FD。已注册的
+`OnSharedPreferenceChangeListener` 会在框架后台线程收到真正发生变化的键，不需要重启应用。连续快速写入
+可能合并中间状态，但最终完整状态不会丢失；通道异常时保留最后一次有效快照，不影响 Hook 主链路。
 
 数据位于 `/data/adb/zygisk_framework/data/<module-id>/preferences/`。同 ID 模块升级或强制降级不会覆盖
 配置；`remove <module-id>` 会删除配置。单组最大 1 MiB、每模块最多 64 组且总计最大 4 MiB，单个字符串

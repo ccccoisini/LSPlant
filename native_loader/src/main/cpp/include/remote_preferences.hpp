@@ -7,9 +7,9 @@
 namespace zygisk_framework {
 
 /**
- * 把 specialize 前取得的 Preferences 快照和 companion FD 转移到进程级缓存。
+ * 把 specialize 前取得的 Preferences 快照和只读共享映射转移到进程级缓存。
  *
- * @param state 当前目标进程状态；调用后 companion_fd 所有权被转移
+ * @param state 当前目标进程状态；调用后共享映射所有权被转移
  */
 void InitializeRemotePreferences(ProcessState &state);
 
@@ -33,7 +33,7 @@ jbyteArray NativeGetRemotePreferencesSnapshot(JNIEnv *env, jclass,
  * 阻塞等待实时 Preferences 更新并返回内部事件帧。
  *
  * @param env 当前 JNI 环境
- * @return 更新事件；连接关闭时返回 null
+ * @return 更新事件；共享通道关闭或降级时返回 null
  */
 jbyteArray NativeAwaitRemotePreferencesUpdate(JNIEnv *env, jclass);
 

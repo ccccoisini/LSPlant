@@ -30,6 +30,11 @@ cd hook_template
 进程中只读，支持标准六类 SharedPreferences 值和变更监听器；配置由设备端 root CLI 的
 `prefs` 命令写入，运行中的目标进程无需重启即可收到更新。
 
+实时通道在 specialize 前由目标创建 memfd，再由 Root Companion 打开并初始化；目标只保留只读映射，
+specialize 后不保留 companion socket 或共享内存 FD，也不要求 Zygisk 支持 `exemptFd()`。连续快速提交
+可能合并中间版本；监听器始终按上次已观察
+快照与最新完整快照之间的差异通知，并保证最终状态一致。
+
 构建仓库子模块模板：
 
 ```sh

@@ -40,6 +40,8 @@ add_library(zygisk_framework SHARED
     target_client.cpp
     fd_protocol.cpp
     preference_store.cpp
+    shared_preferences_transport.cpp
+    remote_preferences_manager.cpp
     remote_preferences.cpp
     lsplant_engine.cpp
     art_symbol_resolver.cpp
@@ -74,3 +76,9 @@ target_link_libraries(zygisk_framework
     log
     dl
 )
+
+add_executable(remote_preferences_transport_test
+    shared_preferences_transport_test.cpp
+    shared_preferences_transport.cpp
+)
+target_include_directories(remote_preferences_transport_test PRIVATE include)

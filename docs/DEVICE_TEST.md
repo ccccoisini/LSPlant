@@ -30,5 +30,6 @@ adb wait-for-device
 dist/device-verification-report.txt
 ```
 
-脚本会检查 `TARGET_MATCH`、`LSPLANT_INIT_OK`、`FRAMEWORK_DEX_LOADED`、`MODULE_DEX_LOADED`、模板生命周期
-Hook、Remote Preferences 初始读取与实时更新，并确认配置更新过程中目标 PID 保持不变。
+脚本会先在设备执行 native 共享内存/futex 测试，再检查 `TARGET_MATCH`、`LSPLANT_INIT_OK`、
+`FRAMEWORK_DEX_LOADED`、`MODULE_DEX_LOADED`、模板生命周期 Hook、Remote Preferences 初始读取与实时
+更新，并确认配置更新过程中目标 PID 保持不变、损坏文件不会覆盖最后有效快照。

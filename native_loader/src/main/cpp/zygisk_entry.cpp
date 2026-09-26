@@ -1,6 +1,7 @@
 #include "zygisk.hpp"
 
 #include <jni.h>
+#include <sys/mman.h>
 
 #include <string>
 
@@ -58,7 +59,11 @@ void CloseProcessState(ProcessState &state) {
     for (auto &module : state.modules) {
         CloseFd(module.dex_fd);
     }
-    CloseFd(state.companion_fd);
+    if (state.remote_preferences_region != nullptr) {
+        munmap(state.remote_preferences_region, state.remote_preferences_region_size);
+        state.remote_preferences_region = nullptr;
+        state.remote_preferences_region_size = 0;
+    }
 }
 
 }  // namespace
@@ -96,7 +101,7 @@ public:
         if (state_.process_name.empty()) {
             return;
         }
-        if (!QueryCompanion(api_, env_, args, state_.process_name, state_)) {
+        if (!QueryCompanion(api_, state_.process_name, state_)) {
             CloseProcessState(state_);
             return;
         }

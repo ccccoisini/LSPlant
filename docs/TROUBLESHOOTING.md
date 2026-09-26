@@ -20,3 +20,8 @@
 
 没有 `TEMPLATE_HOOK_BEFORE/TEMPLATE_HOOK_AFTER`：
 确认模板 `scope.list` 与目标应用包名一致，并重新 force-stop 后启动 App。
+
+没有 Remote Preferences 实时更新：
+检查目标进程日志是否出现 `REMOTE_PREFS_CHANNEL_READY mode=SHARED_MEMORY`。若出现
+`SHARED_MEMORY_CREATE_FAILED`、`MAP_FAILED`、`SIZE_LIMIT` 或 `INOTIFY_SETUP_FAILED`，框架只使用启动时
+快照；若出现 `MANAGER_STALLED`，说明 companion 已停止更新 heartbeat，需要重启目标进程建立新通道。

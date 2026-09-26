@@ -2,10 +2,7 @@
 
 #include <dirent.h>
 #include <fcntl.h>
-#include <poll.h>
-#include <sys/socket.h>
 #include <sys/stat.h>
-#include <sys/inotify.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -18,6 +15,7 @@
 
 #include "logging.hpp"
 #include "preference_store.hpp"
+#include "remote_preferences_manager.hpp"
 #include "zygisk.hpp"
 
 namespace zygisk_framework {
@@ -153,74 +151,14 @@ void LoadModules(ProcessState &state) {
                 "MODULE_SCOPE_MATCH id=%s process=%s", module_id.c_str(), state.process_name.c_str());
         std::string preference_directory;
         if (EnsurePreferenceDirectory(module_id, preference_directory)) {
-            LoadModulePreferences(module_id, module.remote_preferences);
+            if (!LoadModulePreferences(module_id, module.remote_preferences)) {
+                module.remote_preferences.clear();
+            }
         } else {
             ZYGISK_FRAMEWORK_LOGW(ZYGISK_FRAMEWORK_LOG_TAG_COMPANION,
                     "REMOTE_PREFS_DEGRADED reason=DATA_DIRECTORY_INVALID id=%s", module_id.c_str());
         }
         state.modules.push_back(module);
-    }
-}
-
-int CreatePreferenceWatcher(ProcessState &state) {
-    int watcher = inotify_init1(IN_CLOEXEC | IN_NONBLOCK);
-    if (watcher < 0) return -1;
-    constexpr uint32_t mask = IN_CLOSE_WRITE | IN_MOVED_TO | IN_DELETE | IN_CREATE |
-                              IN_ATTRIB | IN_DELETE_SELF | IN_MOVE_SELF;
-    for (const auto &module : state.modules) {
-        std::string directory;
-        if (!EnsurePreferenceDirectory(module.module_id, directory) ||
-            inotify_add_watch(watcher, directory.c_str(), mask) < 0) {
-            close(watcher);
-            return -1;
-        }
-    }
-    return watcher;
-}
-
-bool ReloadPreferences(int socket, ProcessState &state, bool send_updates) {
-    for (auto &module : state.modules) {
-        std::map<std::string, std::string> current;
-        if (!LoadModulePreferences(module.module_id, current)) {
-            continue;
-        }
-        if (send_updates) {
-            for (const auto &[group, snapshot] : current) {
-                auto old = module.remote_preferences.find(group);
-                if (old == module.remote_preferences.end() || old->second != snapshot) {
-                    if (!SendPreferenceUpdate(socket, module.module_id, group, snapshot)) return false;
-                }
-            }
-            for (const auto &[group, snapshot] : module.remote_preferences) {
-                (void) snapshot;
-                if (!current.contains(group) &&
-                    !SendPreferenceUpdate(socket, module.module_id, group, "")) return false;
-            }
-        }
-        module.remote_preferences = std::move(current);
-    }
-    return true;
-}
-
-void WatchPreferences(int socket, int watcher, ProcessState &state) {
-    std::vector<char> events(16 * 1024);
-    while (true) {
-        pollfd fds[2] = {
-                {socket, POLLIN | POLLHUP | POLLERR, 0},
-                {watcher, POLLIN | POLLERR, 0},
-        };
-        int result = TEMP_FAILURE_RETRY(poll(fds, 2, -1));
-        if (result <= 0 || (fds[0].revents & (POLLHUP | POLLERR | POLLNVAL)) != 0 ||
-            (fds[1].revents & (POLLERR | POLLNVAL)) != 0) {
-            return;
-        }
-        if ((fds[0].revents & POLLIN) != 0) return;
-        if ((fds[1].revents & POLLIN) == 0) continue;
-        while (TEMP_FAILURE_RETRY(read(watcher, events.data(), events.size())) > 0) {
-        }
-        if (!ReloadPreferences(socket, state, true)) return;
-        ZYGISK_FRAMEWORK_LOGI(ZYGISK_FRAMEWORK_LOG_TAG_COMPANION,
-                "REMOTE_PREFS_UPDATE process=%s", state.process_name.c_str());
     }
 }
 
@@ -233,8 +171,10 @@ void CloseState(ProcessState &state) {
 }  // namespace
 
 void CompanionHandler(int socket) {
+    int32_t process_id = 0;
+    int shared_memory_fd = -1;
     std::string process_name;
-    if (!ReceiveProcessQuery(socket, process_name)) {
+    if (!ReceiveProcessQuery(socket, process_id, shared_memory_fd, process_name)) {
         SendNoMatchResponse(socket, 1, "bad request");
         return;
     }
@@ -246,22 +186,20 @@ void CompanionHandler(int socket) {
         return;
     }
     state.target = true;
-    int watcher = CreatePreferenceWatcher(state);
-    if (watcher >= 0) {
-        ReloadPreferences(socket, state, false);
-    }
+    RemotePreferencesSession session = RegisterRemotePreferencesSession(
+            process_id, shared_memory_fd, process_name, state);
     ZYGISK_FRAMEWORK_LOGI(ZYGISK_FRAMEWORK_LOG_TAG_COMPANION,
             "TARGET_MATCH process=%s modules=%zu", process_name.c_str(), state.modules.size());
-    bool sent = SendMatchResponse(socket, state);
-    if (!sent) {
-        ZYGISK_FRAMEWORK_LOGE(ZYGISK_FRAMEWORK_LOG_TAG_COMPANION, "TARGET_CONFIG_ERROR code=RESPONSE_SEND_FAILED");
-    } else if (watcher < 0) {
+    if (!session.failure_reason.empty()) {
         ZYGISK_FRAMEWORK_LOGW(ZYGISK_FRAMEWORK_LOG_TAG_COMPANION,
-                "REMOTE_PREFS_DEGRADED reason=INOTIFY_SETUP_FAILED process=%s", process_name.c_str());
-    } else {
-        WatchPreferences(socket, watcher, state);
+                "REMOTE_PREFS_DEGRADED reason=%s process=%s",
+                session.failure_reason.c_str(), process_name.c_str());
     }
-    if (watcher >= 0) close(watcher);
+    bool sent = SendMatchResponse(socket, state, session.region_size);
+    if (!sent) {
+        UnregisterRemotePreferencesSession(session.id);
+        ZYGISK_FRAMEWORK_LOGE(ZYGISK_FRAMEWORK_LOG_TAG_COMPANION, "TARGET_CONFIG_ERROR code=RESPONSE_SEND_FAILED");
+    }
     CloseState(state);
 }
 

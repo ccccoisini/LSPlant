@@ -947,7 +947,7 @@ case "$COMMAND" in
     usage
     ;;
   version|--version)
-    printf 'zygisk_framework CLI 0.4.0\n'
+    printf 'zygisk_framework CLI 0.5.0\n'
     ;;
   install)
     install_module "$@"

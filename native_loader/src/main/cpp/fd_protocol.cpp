@@ -1,6 +1,7 @@
 #include "fd_protocol.hpp"
 
 #include <sys/socket.h>
+#include <sys/mman.h>
 #include <unistd.h>
 
 #include <cerrno>
@@ -8,6 +9,7 @@
 #include <vector>
 
 #include "logging.hpp"
+#include "shared_preferences_transport.hpp"
 
 namespace zygisk_framework {
 namespace {
@@ -99,89 +101,55 @@ bool GetString(const std::string &payload, size_t &offset, std::string &value,
     return true;
 }
 
-bool SendMessageWithFds(int socket, const WireHeader &header, const std::string &payload,
-                        const std::vector<int> &fds) {
-    if (!SendAll(socket, &header, sizeof(header)) ||
-        !SendAll(socket, payload.data(), payload.size())) {
-        return false;
-    }
-    if (fds.empty()) {
-        return true;
-    }
-
-    char byte = 0;
-    iovec iov{&byte, sizeof(byte)};
-    std::vector<char> control(CMSG_SPACE(sizeof(int) * fds.size()));
-    msghdr msg{};
-    msg.msg_iov = &iov;
-    msg.msg_iovlen = 1;
-    msg.msg_control = control.data();
-    msg.msg_controllen = control.size();
-
-    cmsghdr *cmsg = CMSG_FIRSTHDR(&msg);
-    cmsg->cmsg_level = SOL_SOCKET;
-    cmsg->cmsg_type = SCM_RIGHTS;
-    cmsg->cmsg_len = CMSG_LEN(sizeof(int) * fds.size());
-    memcpy(CMSG_DATA(cmsg), fds.data(), sizeof(int) * fds.size());
-    msg.msg_controllen = cmsg->cmsg_len;
-    return TEMP_FAILURE_RETRY(sendmsg(socket, &msg, 0)) == 1;
-}
-
-bool RecvFds(int socket, uint32_t fd_count, std::vector<int> &fds) {
-    if (fd_count == 0) {
-        return true;
-    }
-    if (fd_count > 64) {
-        return false;
-    }
-    char byte = 0;
-    iovec iov{&byte, sizeof(byte)};
-    std::vector<char> control(CMSG_SPACE(sizeof(int) * fd_count));
-    msghdr msg{};
-    msg.msg_iov = &iov;
-    msg.msg_iovlen = 1;
-    msg.msg_control = control.data();
-    msg.msg_controllen = control.size();
-    ssize_t read_size = TEMP_FAILURE_RETRY(recvmsg(socket, &msg, 0));
-    if (read_size != 1) {
-        return false;
-    }
-    for (cmsghdr *cmsg = CMSG_FIRSTHDR(&msg); cmsg != nullptr; cmsg = CMSG_NXTHDR(&msg, cmsg)) {
-        if (cmsg->cmsg_level != SOL_SOCKET || cmsg->cmsg_type != SCM_RIGHTS) {
-            continue;
-        }
-        size_t count = (cmsg->cmsg_len - CMSG_LEN(0)) / sizeof(int);
-        auto *data = reinterpret_cast<int *>(CMSG_DATA(cmsg));
-        fds.assign(data, data + count);
-        return fds.size() == fd_count;
-    }
-    return false;
+bool SendMessage(int socket, const WireHeader &header, const std::string &payload) {
+    return SendAll(socket, &header, sizeof(header)) &&
+           SendAll(socket, payload.data(), payload.size());
 }
 
 }  // namespace
 
-bool SendProcessQuery(int socket, const std::string &process_name) {
-    if (process_name.size() > 512) {
+bool SendProcessQuery(int socket, int32_t process_id, int shared_memory_fd,
+                      const std::string &process_name) {
+    if (process_id <= 0 || process_name.empty() || process_name.size() > 512) {
         return false;
     }
+    std::string payload;
+    PutU32(payload, static_cast<uint32_t>(process_id));
+    PutU32(payload, shared_memory_fd < 0 ? UINT32_MAX :
+                                          static_cast<uint32_t>(shared_memory_fd));
+    PutString(payload, process_name);
     WireHeader header{kProtocolMagic, kProtocolVersion, kOperationQueryProcess, 0,
-                      static_cast<uint32_t>(process_name.size()), 0};
+                      static_cast<uint32_t>(payload.size()), 0};
     return SendAll(socket, &header, sizeof(header)) &&
-           SendAll(socket, process_name.data(), process_name.size());
+           SendAll(socket, payload.data(), payload.size());
 }
 
-bool ReceiveProcessQuery(int socket, std::string &process_name) {
+bool ReceiveProcessQuery(int socket, int32_t &process_id, int &shared_memory_fd,
+                         std::string &process_name) {
     WireHeader header{};
     if (!RecvAll(socket, &header, sizeof(header))) {
         return false;
     }
     if (header.magic != kProtocolMagic || header.version != kProtocolVersion ||
-        header.operation != kOperationQueryProcess || header.payload_size > 512 ||
+        header.operation != kOperationQueryProcess || header.payload_size > 1024 ||
         header.fd_count != 0) {
         return false;
     }
-    process_name.assign(header.payload_size, '\0');
-    return RecvAll(socket, process_name.data(), process_name.size());
+    std::string payload(header.payload_size, '\0');
+    if (!RecvAll(socket, payload.data(), payload.size())) return false;
+    size_t offset = 0;
+    uint32_t pid = 0;
+    uint32_t memory_fd = UINT32_MAX;
+    if (!GetU32(payload, offset, pid) || pid == 0 || pid > INT32_MAX ||
+        !GetU32(payload, offset, memory_fd) ||
+        (memory_fd != UINT32_MAX && memory_fd > INT32_MAX) ||
+        !GetString(payload, offset, process_name, 512) || process_name.empty() ||
+        offset != payload.size()) {
+        return false;
+    }
+    process_id = static_cast<int32_t>(pid);
+    shared_memory_fd = memory_fd == UINT32_MAX ? -1 : static_cast<int>(memory_fd);
+    return true;
 }
 
 bool SendNoMatchResponse(int socket, uint32_t status, const std::string &message) {
@@ -190,13 +158,20 @@ bool SendNoMatchResponse(int socket, uint32_t status, const std::string &message
     PutString(payload, message);
     WireHeader header{kProtocolMagic, kProtocolVersion, kOperationQueryProcess, status,
                       static_cast<uint32_t>(payload.size()), 0};
-    return SendMessageWithFds(socket, header, payload, {});
+    return SendMessage(socket, header, payload);
 }
 
-bool SendMatchResponse(int socket, const ProcessState &state) {
+bool SendMatchResponse(int socket, const ProcessState &state,
+                       size_t shared_preferences_size) {
+    bool has_shared_preferences = shared_preferences_size > 0 &&
+                                  shared_preferences_size <= UINT32_MAX;
     std::string payload;
     PutU32(payload, 1);
     PutString(payload, "");
+    PutU32(payload, has_shared_preferences ? 1U : 0U);
+    PutU32(payload, has_shared_preferences
+                            ? static_cast<uint32_t>(shared_preferences_size)
+                            : 0U);
     PutU32(payload, static_cast<uint32_t>(state.modules.size()));
     for (const auto &module : state.modules) {
         std::string module_dex;
@@ -208,6 +183,7 @@ bool SendMatchResponse(int socket, const ProcessState &state) {
         PutString(payload, module.java_init_list);
         PutString(payload, module.module_prop);
         PutString(payload, module.scope_list);
+        PutU32(payload, module.remote_preferences_generation);
         PutU32(payload, static_cast<uint32_t>(module.remote_preferences.size()));
         for (const auto &[group, snapshot] : module.remote_preferences) {
             PutString(payload, group);
@@ -216,28 +192,21 @@ bool SendMatchResponse(int socket, const ProcessState &state) {
     }
     WireHeader header{kProtocolMagic, kProtocolVersion, kOperationQueryProcess, 0,
                       static_cast<uint32_t>(payload.size()), 0};
-    return SendMessageWithFds(socket, header, payload, {});
+    return SendMessage(socket, header, payload);
 }
 
-bool ReceiveCompanionResponse(int socket, ProcessState &state) {
+bool ReceiveCompanionResponse(int socket, int shared_memory_fd, ProcessState &state) {
     WireHeader header{};
     if (!RecvAll(socket, &header, sizeof(header))) {
         return false;
     }
     if (header.magic != kProtocolMagic || header.version != kProtocolVersion ||
-        header.operation != kOperationQueryProcess || header.payload_size > 80 * 1024 * 1024) {
+        header.operation != kOperationQueryProcess || header.payload_size > 80 * 1024 * 1024 ||
+        header.fd_count != 0) {
         return false;
     }
     std::string payload(header.payload_size, '\0');
-    if (!RecvAll(socket, payload.data(), payload.size())) {
-        return false;
-    }
-    std::vector<int> fds;
-    bool fd_receive_ok = RecvFds(socket, header.fd_count, fds);
-    if (!fd_receive_ok) {
-        ZYGISK_FRAMEWORK_LOGW(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE, "DEX_FD_RECEIVED code=SCM_RIGHTS_RECEIVE_FAILED");
-        fds.clear();
-    }
+    if (!RecvAll(socket, payload.data(), payload.size())) return false;
 
     size_t offset = 0;
     uint32_t matched = 0;
@@ -247,12 +216,19 @@ bool ReceiveCompanionResponse(int socket, ProcessState &state) {
     }
     if (header.status != 0 || matched == 0) {
         state.target = false;
-        for (int fd : fds) close(fd);
         return true;
     }
+    uint32_t has_shared_preferences = 0;
+    uint32_t shared_preferences_size = 0;
     uint32_t module_count = 0;
-    if (!GetU32(payload, offset, module_count)) {
-        for (int fd : fds) close(fd);
+    if (!GetU32(payload, offset, has_shared_preferences) || has_shared_preferences > 1 ||
+        !GetU32(payload, offset, shared_preferences_size) ||
+        !GetU32(payload, offset, module_count) || module_count == 0 ||
+        (has_shared_preferences == 1 &&
+         (shared_preferences_size == 0 ||
+          shared_preferences_size > kMaxSharedPreferencesRegionSize)) ||
+        (has_shared_preferences == 0 &&
+         shared_preferences_size != 0)) {
         return false;
     }
     state.target = true;
@@ -264,15 +240,13 @@ bool ReceiveCompanionResponse(int socket, ProcessState &state) {
             !GetString(payload, offset, module_dex_blob, 32 * 1024 * 1024) ||
             !GetString(payload, offset, module.java_init_list, 64 * 1024) ||
             !GetString(payload, offset, module.module_prop, 64 * 1024) ||
-            !GetString(payload, offset, module.scope_list, 64 * 1024)) {
-            for (size_t j = i; j < fds.size(); ++j) close(fds[j]);
+            !GetString(payload, offset, module.scope_list, 64 * 1024) ||
+            !GetU32(payload, offset, module.remote_preferences_generation)) {
             return false;
         }
         module.dex_bytes.assign(module_dex_blob.begin(), module_dex_blob.end());
-        module.dex_fd = fds.size() == module_count ? fds[i] : -1;
         uint32_t group_count = 0;
         if (!GetU32(payload, offset, group_count) || group_count > 64) {
-            for (size_t j = i; j < fds.size(); ++j) close(fds[j]);
             return false;
         }
         size_t preference_bytes = 0;
@@ -281,54 +255,40 @@ bool ReceiveCompanionResponse(int socket, ProcessState &state) {
             std::string snapshot;
             if (!GetString(payload, offset, group, 128) ||
                 !GetString(payload, offset, snapshot, 1024 * 1024)) {
-                for (size_t j = i; j < fds.size(); ++j) close(fds[j]);
                 return false;
             }
             preference_bytes += snapshot.size();
             if (group.empty() || preference_bytes > 4 * 1024 * 1024 ||
                 !module.remote_preferences.emplace(group, std::move(snapshot)).second) {
-                for (size_t j = i; j < fds.size(); ++j) close(fds[j]);
                 return false;
             }
         }
         state.modules.push_back(module);
     }
-    return offset == payload.size();
-}
-
-bool SendPreferenceUpdate(int socket, const std::string &module_id,
-                          const std::string &group, const std::string &snapshot) {
-    if (module_id.empty() || module_id.size() > 512 || group.empty() || group.size() > 128 ||
-        snapshot.size() > 1024 * 1024) {
+    if (offset != payload.size()) {
         return false;
     }
-    std::string payload;
-    PutString(payload, module_id);
-    PutString(payload, group);
-    PutString(payload, snapshot);
-    WireHeader header{kProtocolMagic, kProtocolVersion, kOperationPreferenceUpdate, 0,
-                      static_cast<uint32_t>(payload.size()), 0};
-    return SendMessageWithFds(socket, header, payload, {});
-}
-
-bool ReceivePreferenceUpdate(int socket, std::string &module_id,
-                             std::string &group, std::string &snapshot) {
-    WireHeader header{};
-    if (!RecvAll(socket, &header, sizeof(header)) ||
-        header.magic != kProtocolMagic || header.version != kProtocolVersion ||
-        header.operation != kOperationPreferenceUpdate || header.status != 0 ||
-        header.fd_count != 0 || header.payload_size > 1024 * 1024 + 1024) {
-        return false;
+    if (has_shared_preferences == 1 && shared_memory_fd >= 0) {
+        void *region = mmap(nullptr, shared_preferences_size, PROT_READ, MAP_SHARED,
+                            shared_memory_fd, 0);
+        if (region == MAP_FAILED) {
+            ZYGISK_FRAMEWORK_LOGW(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE,
+                    "REMOTE_PREFS_DEGRADED reason=MAP_FAILED");
+        } else if (!ValidateSharedPreferencesRegion(
+                           region, shared_preferences_size, state.modules.size())) {
+            munmap(region, shared_preferences_size);
+            ZYGISK_FRAMEWORK_LOGW(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE,
+                    "REMOTE_PREFS_DEGRADED reason=MAP_FAILED");
+        } else {
+            madvise(region, shared_preferences_size, MADV_DONTDUMP);
+            state.remote_preferences_region = region;
+            state.remote_preferences_region_size = shared_preferences_size;
+        }
+    } else if (has_shared_preferences == 1) {
+        ZYGISK_FRAMEWORK_LOGW(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE,
+                "REMOTE_PREFS_DEGRADED reason=MAP_FAILED");
     }
-    std::string payload(header.payload_size, '\0');
-    if (!RecvAll(socket, payload.data(), payload.size())) {
-        return false;
-    }
-    size_t offset = 0;
-    return GetString(payload, offset, module_id, 512) &&
-           GetString(payload, offset, group, 128) &&
-           GetString(payload, offset, snapshot, 1024 * 1024) &&
-           !module_id.empty() && !group.empty() && offset == payload.size();
+    return true;
 }
 
 void CloseFd(int &fd) {

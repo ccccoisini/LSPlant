@@ -52,7 +52,6 @@ if [[ ! "$PACKAGE" =~ ^[A-Za-z0-9_][A-Za-z0-9_.:$-]*$ ]]; then
   echo "Invalid package/process name: $PACKAGE" >&2
   exit 2
 fi
-
 REPORT="$ROOT_DIR/dist/device-verification-report.txt"
 mkdir -p "$ROOT_DIR/dist"
 : > "$REPORT"
@@ -93,6 +92,13 @@ require_marker() {
 
 command -v adb >/dev/null
 run_adb get-state >/dev/null
+LAUNCHER_COMPONENT="$(run_adb shell cmd package resolve-activity --brief \
+  -a android.intent.action.MAIN -c android.intent.category.LAUNCHER "$PACKAGE" \
+  2>/dev/null | tr -d '\r' | tail -n 1)"
+if [[ ! "$LAUNCHER_COMPONENT" =~ ^[A-Za-z0-9_.]+/[A-Za-z0-9_.$]+$ ]]; then
+  echo "Unable to resolve launcher activity for $PACKAGE" >&2
+  exit 1
+fi
 API="$(run_adb shell getprop ro.build.version.sdk | tr -d '\r')"
 MODEL="$(run_adb shell getprop ro.product.model | tr -d '\r')"
 ABI="$(run_adb shell getprop ro.product.cpu.abilist | tr -d '\r')"
@@ -104,6 +110,23 @@ record "abi=$ABI"
 record "rootManager=$ROOT_MANAGER"
 record "moduleId=$MODULE_ID"
 record "targetPackage=$PACKAGE"
+
+TRANSPORT_TEST="$(find "$ROOT_DIR/native_loader/build/intermediates/cxx" \
+  -type f -name remote_preferences_transport_test -print 2>/dev/null | head -n 1)"
+if [ -z "$TRANSPORT_TEST" ] || [ ! -s "$TRANSPORT_TEST" ]; then
+  record "REAL_DEVICE_HOOK_ACCEPTANCE: FAIL reason=NATIVE_TRANSPORT_TEST_MISSING"
+  exit 1
+fi
+run_adb push "$TRANSPORT_TEST" /data/local/tmp/remote_preferences_transport_test >/dev/null
+run_adb shell chmod 0755 /data/local/tmp/remote_preferences_transport_test
+TRANSPORT_OUTPUT="$(run_root /data/local/tmp/remote_preferences_transport_test | tr -d '\r')"
+run_adb shell rm -f /data/local/tmp/remote_preferences_transport_test
+if [ "$TRANSPORT_OUTPUT" = "REMOTE_PREFERENCES_TRANSPORT_TEST_PASS" ]; then
+  record "PASS native_remote_preferences_transport=true"
+else
+  record "REAL_DEVICE_HOOK_ACCEPTANCE: FAIL reason=NATIVE_TRANSPORT_TEST_FAILED"
+  exit 1
+fi
 
 if [ "$API" -lt 26 ]; then
   record "REAL_DEVICE_HOOK_ACCEPTANCE: FAIL reason=API_TOO_LOW"
@@ -158,15 +181,18 @@ fi
 run_adb shell am force-stop "$PACKAGE" >/dev/null || true
 run_adb logcat -c
 FAIL=0
-run_adb shell monkey -p "$PACKAGE" -c android.intent.category.LAUNCHER 1 >/dev/null
+# 清空并重建 Activity task，但保持 Application 进程存活，以确定性触发下一轮设置读取。
+run_adb shell am start -W -n "$LAUNCHER_COMPONENT" -f 0x10008000 >/dev/null
 sleep 5
 PID_BEFORE="$(run_adb shell pidof "$PACKAGE" | tr -d '\r' || true)"
 record "targetPidBeforePrefsUpdate=$PID_BEFORE"
 
+run_root "/data/adb/zygisk_framework/bin/zygisk_framework prefs $MODULE_ID settings set enabled boolean false"
+run_root "/data/adb/zygisk_framework/bin/zygisk_framework prefs $MODULE_ID settings set android_id string 1111111111111111"
 run_root "/data/adb/zygisk_framework/bin/zygisk_framework prefs $MODULE_ID settings set enabled boolean true"
 run_root "/data/adb/zygisk_framework/bin/zygisk_framework prefs $MODULE_ID settings set android_id string fedcba9876543210"
 sleep 2
-run_adb shell monkey -p "$PACKAGE" -c android.intent.category.LAUNCHER 1 >/dev/null
+run_adb shell am start -W -n "$LAUNCHER_COMPONENT" -f 0x10008000 >/dev/null
 sleep 3
 PID_AFTER="$(run_adb shell pidof "$PACKAGE" | tr -d '\r' || true)"
 record "targetPidAfterPrefsUpdate=$PID_AFTER"
@@ -176,6 +202,14 @@ else
   record "FAIL preferences_update_kept_pid=false"
   FAIL=1
 fi
+
+# 非法文件必须被 companion 拒绝，且不能覆盖目标进程中的最后有效快照。
+run_root "/data/adb/zygisk_framework/bin/zygisk_framework prefs $MODULE_ID resilient set value string valid"
+sleep 1
+run_root "printf 'broken\\n' > /data/adb/zygisk_framework/data/$MODULE_ID/preferences/cmVzaWxpZW50.prefs; chmod 0600 /data/adb/zygisk_framework/data/$MODULE_ID/preferences/cmVzaWxpZW50.prefs"
+sleep 2
+run_adb shell am force-stop "$PACKAGE" >/dev/null || true
+sleep 3
 
 LOG_FILE="$(mktemp)"
 run_adb logcat -d -s zygisk_framework.Native:V zygisk_framework.Runtime:V zygisk_framework.Module:V zygisk_framework.Companion:V HookTemplate:V HookTemplate.AndroidId:V AndroidRuntime:E > "$LOG_FILE"
@@ -192,15 +226,19 @@ require_marker "TEMPLATE_HOOK_INSTALLED package=$PACKAGE" || FAIL=1
 require_marker "TEMPLATE_HOOK_BEFORE package=$PACKAGE" || FAIL=1
 require_marker "TEMPLATE_HOOK_AFTER package=$PACKAGE" || FAIL=1
 require_marker "REMOTE_PREFS_READY group=settings" || FAIL=1
+require_marker "REMOTE_PREFS_CHANNEL_READY mode=SHARED_MEMORY" || FAIL=1
 if grep -Fq "REMOTE_PREFS_DEGRADED reason=SOCKET_EXEMPT_FAILED" "$LOG_FILE"; then
-  record "FAIL remote_preferences_live_channel=false reason=SOCKET_EXEMPT_FAILED"
+  record "FAIL obsolete_socket_channel_detected=true"
   FAIL=1
 else
-  require_marker "REMOTE_PREFS_UPDATE id=$MODULE_ID group=settings" || FAIL=1
-  require_marker "REMOTE_PREFS_CHANGED key=enabled" || FAIL=1
-  require_marker "REMOTE_PREFS_CHANGED key=android_id" || FAIL=1
-  require_marker "REMOTE_PREFS_APPLIED key=android_id" || FAIL=1
+  record "PASS obsolete_socket_channel_detected=false"
 fi
+require_marker "REMOTE_PREFS_UPDATE id=$MODULE_ID group=settings" || FAIL=1
+require_marker "REMOTE_PREFS_CHANGED key=enabled" || FAIL=1
+require_marker "REMOTE_PREFS_CHANGED key=android_id" || FAIL=1
+require_marker "REMOTE_PREFS_APPLIED key=android_id" || FAIL=1
+require_marker "REMOTE_PREFS_INVALID id=$MODULE_ID" || FAIL=1
+require_marker "REMOTE_PREFS_SESSION_CLOSED pid=$PID_BEFORE" || FAIL=1
 
 if grep -E 'FATAL EXCEPTION|Fatal signal|Abort message' "$LOG_FILE" >/dev/null; then
   record "FAIL crash_marker_present=true"

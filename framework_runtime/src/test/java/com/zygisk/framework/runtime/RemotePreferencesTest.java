@@ -152,6 +152,30 @@ public class RemotePreferencesTest {
     }
 
     /**
+     * 验证 native 合并快速提交后，Java 只按最终完整快照计算变更键。
+     */
+    @Test
+    public void coalescedUpdatesNotifyFromLastObservedToFinalState() {
+        RemotePreferencesRegistry registry = new RemotePreferencesRegistry((moduleId, group) ->
+                snapshot(group,
+                        entry("boolean", "enabled", "true"),
+                        entry("int", "count", "1")));
+        SharedPreferences preferences = registry.get("module-a", "settings");
+        AtomicInteger notifications = new AtomicInteger();
+        preferences.registerOnSharedPreferenceChangeListener((prefs, key) ->
+                notifications.incrementAndGet());
+
+        registry.applyUpdate(update("module-a", "settings",
+                snapshot("settings",
+                        entry("boolean", "enabled", "true"),
+                        entry("int", "count", "3"))));
+
+        assertTrue(preferences.getBoolean("enabled", false));
+        assertEquals(3, preferences.getInt("count", 0));
+        assertEquals(1, notifications.get());
+    }
+
+    /**
      * 验证越界浮点更新被视为损坏数据，不覆盖最后一次有效快照。
      */
     @Test

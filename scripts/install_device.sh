@@ -13,8 +13,16 @@ if [ -z "$ZIP" ] || [ ! -f "$ZIP" ]; then
   exit 1
 fi
 
-adb "${SERIAL_ARG[@]}" push "$ZIP" /sdcard/Download/
+run_adb() {
+  if [ "${#SERIAL_ARG[@]}" -eq 0 ]; then
+    adb "$@"
+  else
+    adb "${SERIAL_ARG[@]}" "$@"
+  fi
+}
+
+run_adb push "$ZIP" /sdcard/Download/
 REMOTE_ZIP="/sdcard/Download/$(basename "$ZIP")"
 INSTALL_CMD="if command -v magisk >/dev/null 2>&1; then magisk --install-module $REMOTE_ZIP; elif command -v ksud >/dev/null 2>&1; then ksud module install $REMOTE_ZIP; else echo No supported module installer found: magisk/ksud >&2; exit 127; fi"
-adb "${SERIAL_ARG[@]}" shell "su -c '$INSTALL_CMD'"
+run_adb shell "su -c '$INSTALL_CMD'"
 echo "Module installed. Reboot device before verification."

@@ -5,6 +5,7 @@
 #include "dex_loader.hpp"
 #include "logging.hpp"
 #include "lsplant_engine.hpp"
+#include "remote_preferences.hpp"
 
 #ifndef ZYGISK_FRAMEWORK_LSPLANT_COMMIT
 #define ZYGISK_FRAMEWORK_LSPLANT_COMMIT "unknown"
@@ -67,6 +68,10 @@ JNINativeMethod kNativeBridgeMethods[] = {
         {"nativeCreateDexClassLoader",
          "(Ljava/nio/ByteBuffer;Ljava/lang/ClassLoader;)Ljava/lang/ClassLoader;",
          reinterpret_cast<void *>(NativeCreateDexClassLoader)},
+        {"nativeGetRemotePreferencesSnapshot", "(Ljava/lang/String;Ljava/lang/String;)[B",
+         reinterpret_cast<void *>(NativeGetRemotePreferencesSnapshot)},
+        {"nativeAwaitRemotePreferencesUpdate", "()[B",
+         reinterpret_cast<void *>(NativeAwaitRemotePreferencesUpdate)},
 };
 
 }  // namespace

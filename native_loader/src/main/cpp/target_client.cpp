@@ -58,10 +58,56 @@ bool ReadAllModuleDexIntoMemory(ProcessState &state) {
     return true;
 }
 
+bool AppendFdToIgnore(JNIEnv *env, zygisk::AppSpecializeArgs *args, int fd) {
+    if (env == nullptr || args == nullptr || args->fds_to_ignore == nullptr || fd < 0) {
+        return false;
+    }
+    jintArray current = *args->fds_to_ignore;
+    jsize current_size = current == nullptr ? 0 : env->GetArrayLength(current);
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        return false;
+    }
+    std::vector<jint> values(static_cast<size_t>(current_size) + 1);
+    if (current_size > 0) {
+        env->GetIntArrayRegion(current, 0, current_size, values.data());
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+            return false;
+        }
+        for (jsize index = 0; index < current_size; ++index) {
+            if (values[static_cast<size_t>(index)] == fd) return true;
+        }
+    }
+    values[static_cast<size_t>(current_size)] = fd;
+    jintArray replacement = env->NewIntArray(current_size + 1);
+    if (replacement == nullptr) {
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        return false;
+    }
+    env->SetIntArrayRegion(replacement, 0, current_size + 1, values.data());
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        return false;
+    }
+    *args->fds_to_ignore = replacement;
+    return true;
+}
+
+bool PreserveFdAcrossSpecialize(zygisk::Api *api, JNIEnv *env,
+                                zygisk::AppSpecializeArgs *args, int fd) {
+    if (api->exemptFd(fd)) return true;
+    if (!AppendFdToIgnore(env, args, fd)) return false;
+    ZYGISK_FRAMEWORK_LOGI(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE,
+            "FD_EXEMPT_FALLBACK mode=FDS_TO_IGNORE");
+    return true;
+}
+
 }  // namespace
 
-bool QueryCompanion(zygisk::Api *api, const std::string &process_name, ProcessState &state) {
-    if (api == nullptr || process_name.empty()) {
+bool QueryCompanion(zygisk::Api *api, JNIEnv *env, zygisk::AppSpecializeArgs *args,
+                    const std::string &process_name, ProcessState &state) {
+    if (api == nullptr || env == nullptr || args == nullptr || process_name.empty()) {
         return false;
     }
     int socket = api->connectCompanion();
@@ -71,12 +117,20 @@ bool QueryCompanion(zygisk::Api *api, const std::string &process_name, ProcessSt
     }
     bool ok = SendProcessQuery(socket, process_name) &&
               ReceiveCompanionResponse(socket, state);
-    close(socket);
     if (!ok || !state.target) {
+        close(socket);
         if (!ok) {
             ZYGISK_FRAMEWORK_LOGE(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE, "TARGET_CONFIG_ERROR code=COMPANION_RESPONSE_FAILED");
         }
         return false;
+    }
+
+    if (PreserveFdAcrossSpecialize(api, env, args, socket)) {
+        state.companion_fd = socket;
+    } else {
+        close(socket);
+        ZYGISK_FRAMEWORK_LOGW(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE,
+                "REMOTE_PREFS_DEGRADED reason=SOCKET_EXEMPT_FAILED");
     }
 
     bool has_module_fd = false;
@@ -106,7 +160,7 @@ bool QueryCompanion(zygisk::Api *api, const std::string &process_name, ProcessSt
     bool exempt_ok = true;
     for (const auto &module : state.modules) {
         if (module.dex_fd >= 0) {
-            exempt_ok = api->exemptFd(module.dex_fd) && exempt_ok;
+            exempt_ok = PreserveFdAcrossSpecialize(api, env, args, module.dex_fd) && exempt_ok;
         }
     }
     if (!exempt_ok) {

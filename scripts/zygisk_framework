@@ -7,6 +7,7 @@ export LC_ALL
 
 BASE_DIR=/data/adb/zygisk_framework
 MODULES_DIR="$BASE_DIR/modules"
+DATA_DIR="$BASE_DIR/data"
 LOCK_DIR="$BASE_DIR/.cli-lock"
 BUSYBOX=
 LOCK_HELD=0
@@ -15,6 +16,7 @@ BACKUP_DIR=
 INSTALL_TARGET=
 SCOPE_TEMP_FILE=
 SCOPE_NEXT_FILE=
+PREF_TEMP_FILE=
 
 fail() {
   printf 'zygisk_framework: %s\n' "$*" >&2
@@ -38,6 +40,9 @@ cleanup() {
   if [ -n "$SCOPE_NEXT_FILE" ] && [ -f "$SCOPE_NEXT_FILE" ]; then
     "$BUSYBOX" rm -f "$SCOPE_NEXT_FILE"
   fi
+  if [ -n "$PREF_TEMP_FILE" ] && [ -f "$PREF_TEMP_FILE" ]; then
+    "$BUSYBOX" rm -f "$PREF_TEMP_FILE"
+  fi
   if [ "$LOCK_HELD" -eq 1 ]; then
     "$BUSYBOX" rmdir "$LOCK_DIR" 2>/dev/null || true
   fi
@@ -59,6 +64,13 @@ Usage:
   zygisk_framework scope <module-id> remove <target> [target...]
   zygisk_framework scope <module-id> set <target> [target...]
   zygisk_framework scope <module-id> clear
+  zygisk_framework prefs <module-id> <group> list
+  zygisk_framework prefs <module-id> <group> get <key>
+  zygisk_framework prefs <module-id> <group> set <key> string <value>
+  zygisk_framework prefs <module-id> <group> set <key> string-set [value...]
+  zygisk_framework prefs <module-id> <group> set <key> int|long|float|boolean <value>
+  zygisk_framework prefs <module-id> <group> remove <key>
+  zygisk_framework prefs <module-id> <group> clear
   zygisk_framework remove <module-id>
   zygisk_framework enable <module-id>
   zygisk_framework disable <module-id>
@@ -81,7 +93,8 @@ else
   fail "Magisk or KernelSU BusyBox was not found"
 fi
 
-mkdir -p "$MODULES_DIR" || fail "cannot access $MODULES_DIR"
+mkdir -p "$MODULES_DIR" "$DATA_DIR" || fail "cannot access framework data directories"
+chmod 0700 "$DATA_DIR" || fail "cannot secure $DATA_DIR"
 
 is_valid_id() {
   case "$1" in
@@ -359,6 +372,341 @@ manage_scope() {
   esac
 }
 
+byte_length() {
+  printf '%s' "$1" | "$BUSYBOX" wc -c | "$BUSYBOX" tr -d ' '
+}
+
+is_valid_utf8() {
+  if [ -x /system/bin/iconv ]; then
+    printf '%s' "$1" | /system/bin/iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1
+    return
+  fi
+  remaining=0
+  next_min=128
+  next_max=191
+  for byte in $(printf '%s' "$1" | "$BUSYBOX" od -An -v -t u1); do
+    if [ "$remaining" -gt 0 ]; then
+      [ "$byte" -ge "$next_min" ] && [ "$byte" -le "$next_max" ] || return 1
+      remaining=$((remaining - 1))
+      next_min=128
+      next_max=191
+      continue
+    fi
+    if [ "$byte" -le 127 ]; then
+      continue
+    elif [ "$byte" -ge 194 ] && [ "$byte" -le 223 ]; then
+      remaining=1
+    elif [ "$byte" -eq 224 ]; then
+      remaining=2; next_min=160
+    elif [ "$byte" -ge 225 ] && [ "$byte" -le 236 ]; then
+      remaining=2
+    elif [ "$byte" -eq 237 ]; then
+      remaining=2; next_max=159
+    elif [ "$byte" -ge 238 ] && [ "$byte" -le 239 ]; then
+      remaining=2
+    elif [ "$byte" -eq 240 ]; then
+      remaining=3; next_min=144
+    elif [ "$byte" -ge 241 ] && [ "$byte" -le 243 ]; then
+      remaining=3
+    elif [ "$byte" -eq 244 ]; then
+      remaining=3; next_max=143
+    else
+      return 1
+    fi
+  done
+  [ "$remaining" -eq 0 ]
+}
+
+base64_encode() {
+  printf '%s' "$1" | "$BUSYBOX" base64 | "$BUSYBOX" tr -d '\r\n'
+}
+
+base64_decode() {
+  printf '%s' "$1" | "$BUSYBOX" base64 -d 2>/dev/null
+}
+
+base64_url_name() {
+  base64_encode "$1" | "$BUSYBOX" sed 's/+/-/g; s#/#_#g; s/=*$//'
+}
+
+is_valid_pref_name() {
+  value=$1
+  limit=$2
+  [ -n "$value" ] && [ "$(byte_length "$value")" -le "$limit" ] && is_valid_utf8 "$value"
+}
+
+is_integer_in_range() {
+  value=$1
+  positive_limit=$2
+  negative_limit=$3
+  printf '%s\n' "$value" | "$BUSYBOX" grep -Eq '^-?[0-9]+$' || return 1
+  limit=$positive_limit
+  digits=$value
+  case "$value" in
+    -*) digits=${value#-}; limit=$negative_limit ;;
+  esac
+  digits=$(printf '%s\n' "$digits" | "$BUSYBOX" sed 's/^0*//')
+  [ -n "$digits" ] || digits=0
+  [ "${#digits}" -lt "${#limit}" ] && return 0
+  [ "${#digits}" -gt "${#limit}" ] && return 1
+  [ "$digits" = "$limit" ] || [ "$digits" \< "$limit" ]
+}
+
+is_valid_float() {
+  case "$1" in
+    NaN|Infinity|-Infinity) return 0 ;;
+  esac
+  printf '%s\n' "$1" | "$BUSYBOX" grep -Eq '^[-+]?(([0-9]+([.][0-9]*)?)|([.][0-9]+))([eE][-+]?[0-9]+)?$' \
+    || return 1
+  "$BUSYBOX" awk -v value="$1" 'BEGIN {
+    number = value + 0
+    absolute = number < 0 ? -number : number
+    if (absolute > 3.4028234663852886e38) exit 1
+    if (number == 0 && value !~ /^[-+]?((0+([.]0*)?)|([.]0+))([eE][-+]?[0-9]+)?$/) exit 1
+  }'
+}
+
+validate_pref_file() {
+  file=$1
+  expected_group=$2
+  [ -f "$file" ] && [ ! -L "$file" ] || fail "preference group file is unsafe"
+  size=$("$BUSYBOX" wc -c < "$file" | "$BUSYBOX" tr -d ' ')
+  [ "$size" -gt 0 ] && [ "$size" -le 1048576 ] || fail "preference group exceeds 1 MiB"
+  expected_header=$(printf 'ZPREFS\t1\t%s' "$expected_group")
+  actual_header=$("$BUSYBOX" sed -n '1p' "$file")
+  [ "$actual_header" = "$expected_header" ] || fail "preference group has an invalid header"
+  "$BUSYBOX" awk -F '\t' '
+    NR == 1 { next }
+    NF < 3 || seen[$2]++ { exit 1 }
+    $1 == "string" && NF != 3 { exit 1 }
+    $1 == "string-set" && ($3 !~ /^[0-9]+$/ || NF != $3 + 3) { exit 1 }
+    ($1 == "int" || $1 == "long" || $1 == "float" || $1 == "boolean") && NF != 3 { exit 1 }
+    $1 != "string" && $1 != "string-set" && $1 != "int" &&
+      $1 != "long" && $1 != "float" && $1 != "boolean" { exit 1 }
+  ' "$file" || fail "preference group contains malformed or duplicate entries"
+}
+
+prepare_pref_context() {
+  module_id=$1
+  pref_group=$2
+  is_valid_id "$module_id" || fail "invalid module id: $module_id"
+  is_valid_pref_name "$pref_group" 128 || fail "preference group must be 1..128 UTF-8 bytes"
+  read_installed_id "$module_id"
+  module_data_dir="$DATA_DIR/$module_id"
+  PREFS_DIR="$module_data_dir/preferences"
+  [ ! -L "$module_data_dir" ] && [ ! -L "$PREFS_DIR" ] \
+    || fail "module preference directory is unsafe: $module_id"
+  mkdir -p "$PREFS_DIR" || fail "cannot create module preference directory"
+  chmod 0700 "$module_data_dir" "$PREFS_DIR" || fail "cannot secure module preference directory"
+  PREF_GROUP_ENCODED=$(base64_encode "$pref_group")
+  pref_name=$(base64_url_name "$pref_group")
+  PREF_FILE="$PREFS_DIR/$pref_name.prefs"
+  [ ! -L "$PREF_FILE" ] || fail "preference group file is unsafe"
+  if [ -e "$PREF_FILE" ]; then
+    validate_pref_file "$PREF_FILE" "$PREF_GROUP_ENCODED"
+  fi
+}
+
+show_pref_line() {
+  line=$1
+  tab=$(printf '\t')
+  pref_type=${line%%"$tab"*}
+  rest=${line#*"$tab"}
+  encoded_key=${rest%%"$tab"*}
+  rest=${rest#*"$tab"}
+  key=$(base64_decode "$encoded_key") || fail "cannot decode preference key"
+  printf '%s\t%s' "$pref_type" "$key"
+  if [ "$pref_type" = string ]; then
+    value=$(base64_decode "$rest") || fail "cannot decode string preference"
+    printf '\t%s' "$value"
+  elif [ "$pref_type" = string-set ]; then
+    count=${rest%%"$tab"*}
+    if [ "$rest" = "$count" ]; then
+      rest=
+    else
+      rest=${rest#*"$tab"}
+    fi
+    printf '\t['
+    index=0
+    while [ "$index" -lt "$count" ]; do
+      encoded_value=${rest%%"$tab"*}
+      if [ "$rest" = "$encoded_value" ]; then
+        rest=
+      else
+        rest=${rest#*"$tab"}
+      fi
+      value=$(base64_decode "$encoded_value") || fail "cannot decode string-set preference"
+      [ "$index" -eq 0 ] || printf ', '
+      printf '%s' "$value"
+      index=$((index + 1))
+    done
+    printf ']'
+  else
+    printf '\t%s' "$rest"
+  fi
+  printf '\n'
+}
+
+check_pref_total_limit() {
+  replacement=$1
+  old_size=0
+  [ ! -f "$PREF_FILE" ] || old_size=$("$BUSYBOX" wc -c < "$PREF_FILE" | "$BUSYBOX" tr -d ' ')
+  new_size=$("$BUSYBOX" wc -c < "$replacement" | "$BUSYBOX" tr -d ' ')
+  [ "$new_size" -le 1048576 ] || fail "preference group exceeds 1 MiB"
+  total=0
+  group_count=0
+  for candidate in "$PREFS_DIR"/*.prefs; do
+    [ -f "$candidate" ] && [ ! -L "$candidate" ] || continue
+    total=$((total + $("$BUSYBOX" wc -c < "$candidate" | "$BUSYBOX" tr -d ' ')))
+    group_count=$((group_count + 1))
+  done
+  if [ ! -f "$PREF_FILE" ]; then
+    group_count=$((group_count + 1))
+  fi
+  [ "$group_count" -le 64 ] || fail "module has more than 64 preference groups"
+  total=$((total - old_size + new_size))
+  [ "$total" -le 4194304 ] || fail "module preferences exceed 4 MiB"
+}
+
+write_pref_file() {
+  check_pref_total_limit "$PREF_TEMP_FILE"
+  chmod 0600 "$PREF_TEMP_FILE" || fail "cannot secure preference group"
+  "$BUSYBOX" mv "$PREF_TEMP_FILE" "$PREF_FILE" || fail "cannot atomically replace preference group"
+  PREF_TEMP_FILE=
+}
+
+manage_preferences() {
+  [ "$#" -ge 3 ] || fail "prefs expects a module id, group, and operation"
+  module_id=$1
+  pref_group=$2
+  operation=$3
+  shift 3
+
+  case "$operation" in
+    list|get)
+      prepare_pref_context "$module_id" "$pref_group"
+      if [ ! -f "$PREF_FILE" ]; then
+        [ "$operation" = list ] && printf '(empty)\n' && return 0
+        fail "preference group does not exist: $pref_group"
+      fi
+      if [ "$operation" = list ]; then
+        [ "$#" -eq 0 ] || fail "prefs list takes no key"
+        found=0
+        while IFS= read -r line || [ -n "$line" ]; do
+          case "$line" in ZPREFS*) continue ;; esac
+          [ -n "$line" ] || continue
+          show_pref_line "$line"
+          found=1
+        done < "$PREF_FILE"
+        [ "$found" -eq 1 ] || printf '(empty)\n'
+        return 0
+      fi
+      [ "$#" -eq 1 ] || fail "prefs get expects one key"
+      is_valid_pref_name "$1" 512 || fail "preference key must be 1..512 UTF-8 bytes"
+      encoded_key=$(base64_encode "$1")
+      line=$("$BUSYBOX" awk -F '\t' -v key="$encoded_key" 'NR > 1 && $2 == key { print; found=1; exit } END { if (!found) exit 1 }' "$PREF_FILE") \
+        || fail "preference key does not exist: $1"
+      show_pref_line "$line"
+      ;;
+    set)
+      [ "$#" -ge 2 ] || fail "prefs set expects a key and type"
+      pref_key=$1
+      pref_type=$2
+      shift 2
+      is_valid_pref_name "$pref_key" 512 || fail "preference key must be 1..512 UTF-8 bytes"
+      encoded_key=$(base64_encode "$pref_key")
+      case "$pref_type" in
+        string)
+          [ "$#" -eq 1 ] || fail "string preference expects exactly one value"
+          [ "$(byte_length "$1")" -le 65536 ] && is_valid_utf8 "$1" \
+            || fail "string preference must be valid UTF-8 within 64 KiB"
+          pref_line=$(printf 'string\t%s\t%s' "$encoded_key" "$(base64_encode "$1")")
+          ;;
+        string-set)
+          pref_line=$(printf 'string-set\t%s\t%s' "$encoded_key" "$#")
+          seen_values="|"
+          for value in "$@"; do
+            [ "$(byte_length "$value")" -le 65536 ] && is_valid_utf8 "$value" \
+              || fail "string-set item must be valid UTF-8 within 64 KiB"
+            encoded_value=$(base64_encode "$value")
+            case "$seen_values" in *"|$encoded_value|"*) fail "duplicate string-set value" ;; esac
+            seen_values="$seen_values$encoded_value|"
+            pref_line="$pref_line$(printf '\t%s' "$encoded_value")"
+          done
+          ;;
+        int)
+          [ "$#" -eq 1 ] && is_integer_in_range "$1" 2147483647 2147483648 \
+            || fail "int preference is outside the signed 32-bit range"
+          pref_line=$(printf 'int\t%s\t%s' "$encoded_key" "$1")
+          ;;
+        long)
+          [ "$#" -eq 1 ] && is_integer_in_range "$1" 9223372036854775807 9223372036854775808 \
+            || fail "long preference is outside the signed 64-bit range"
+          pref_line=$(printf 'long\t%s\t%s' "$encoded_key" "$1")
+          ;;
+        float)
+          [ "$#" -eq 1 ] && is_valid_float "$1" \
+            || fail "float preference is invalid or outside the 32-bit range"
+          pref_line=$(printf 'float\t%s\t%s' "$encoded_key" "$1")
+          ;;
+        boolean)
+          [ "$#" -eq 1 ] && { [ "$1" = true ] || [ "$1" = false ]; } \
+            || fail "boolean preference must be true or false"
+          pref_line=$(printf 'boolean\t%s\t%s' "$encoded_key" "$1")
+          ;;
+        *) fail "unknown preference type: $pref_type" ;;
+      esac
+      acquire_lock
+      prepare_pref_context "$module_id" "$pref_group"
+      PREF_TEMP_FILE="$PREFS_DIR/.prefs.tmp.$$"
+      [ ! -e "$PREF_TEMP_FILE" ] && [ ! -L "$PREF_TEMP_FILE" ] || fail "temporary preference file exists"
+      printf 'ZPREFS\t1\t%s\n' "$PREF_GROUP_ENCODED" > "$PREF_TEMP_FILE" \
+        || fail "cannot create temporary preference group"
+      if [ -f "$PREF_FILE" ]; then
+        "$BUSYBOX" awk -F '\t' -v key="$encoded_key" 'NR > 1 && $2 != key { print }' "$PREF_FILE" >> "$PREF_TEMP_FILE" \
+          || fail "cannot copy preference group"
+      fi
+      printf '%s\n' "$pref_line" >> "$PREF_TEMP_FILE" || fail "cannot append preference value"
+      write_pref_file
+      printf 'Updated preference %s/%s/%s. Running targets will be notified.\n' "$module_id" "$pref_group" "$pref_key"
+      ;;
+    remove)
+      [ "$#" -eq 1 ] || fail "prefs remove expects one key"
+      pref_key=$1
+      is_valid_pref_name "$pref_key" 512 || fail "preference key must be 1..512 UTF-8 bytes"
+      acquire_lock
+      prepare_pref_context "$module_id" "$pref_group"
+      if [ ! -f "$PREF_FILE" ]; then
+        printf 'Preference key not present: %s\n' "$pref_key"
+        return 0
+      fi
+      encoded_key=$(base64_encode "$pref_key")
+      if ! "$BUSYBOX" awk -F '\t' -v key="$encoded_key" 'NR > 1 && $2 == key { found=1 } END { exit !found }' "$PREF_FILE"; then
+        printf 'Preference key not present: %s\n' "$pref_key"
+        return 0
+      fi
+      PREF_TEMP_FILE="$PREFS_DIR/.prefs.tmp.$$"
+      printf 'ZPREFS\t1\t%s\n' "$PREF_GROUP_ENCODED" > "$PREF_TEMP_FILE" \
+        || fail "cannot create temporary preference group"
+      "$BUSYBOX" awk -F '\t' -v key="$encoded_key" 'NR > 1 && $2 != key { print }' "$PREF_FILE" >> "$PREF_TEMP_FILE" \
+        || fail "cannot remove preference key"
+      write_pref_file
+      printf 'Removed preference %s/%s/%s. Running targets will be notified.\n' "$module_id" "$pref_group" "$pref_key"
+      ;;
+    clear)
+      [ "$#" -eq 0 ] || fail "prefs clear takes no key"
+      acquire_lock
+      prepare_pref_context "$module_id" "$pref_group"
+      PREF_TEMP_FILE="$PREFS_DIR/.prefs.tmp.$$"
+      printf 'ZPREFS\t1\t%s\n' "$PREF_GROUP_ENCODED" > "$PREF_TEMP_FILE" \
+        || fail "cannot create empty preference group"
+      write_pref_file
+      printf 'Cleared preferences for %s/%s. Running targets will be notified.\n' "$module_id" "$pref_group"
+      ;;
+    *) fail "unknown prefs operation: $operation" ;;
+  esac
+}
+
 show_module_info() {
   module_dir=$1
   prop_file="$module_dir/META-INF/xposed/module.prop"
@@ -562,7 +910,14 @@ remove_module() {
   module_id=$1
   read_installed_id "$module_id"
   acquire_lock
+  if [ -e "$DATA_DIR/$module_id" ]; then
+    [ -d "$DATA_DIR/$module_id" ] && [ ! -L "$DATA_DIR/$module_id" ] \
+      || fail "module data directory is unsafe: $module_id"
+  fi
   "$BUSYBOX" rm -rf "$MODULES_DIR/$module_id" || fail "could not remove $module_id"
+  if [ -e "$DATA_DIR/$module_id" ]; then
+    "$BUSYBOX" rm -rf "$DATA_DIR/$module_id" || fail "could not remove data for $module_id"
+  fi
   printf 'Removed %s.\n' "$module_id"
   printf 'Changes apply to newly started processes; running apps were not stopped.\n'
 }
@@ -592,7 +947,7 @@ case "$COMMAND" in
     usage
     ;;
   version|--version)
-    printf 'zygisk_framework CLI 0.3.0\n'
+    printf 'zygisk_framework CLI 0.4.0\n'
     ;;
   install)
     install_module "$@"
@@ -609,6 +964,9 @@ case "$COMMAND" in
     ;;
   scope)
     manage_scope "$@"
+    ;;
+  prefs)
+    manage_preferences "$@"
     ;;
   remove)
     remove_module "$@"

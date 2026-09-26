@@ -87,7 +87,7 @@ final class FrameworkXposedInterface implements XposedInterface {
 
     @Override
     public SharedPreferences getRemotePreferences(String group) {
-        throw new UnsupportedOperationException("Remote preferences are not supported in MVP");
+        return RemotePreferencesRegistry.getInstance().get(moduleId, group);
     }
 
     @Override

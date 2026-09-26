@@ -6,6 +6,7 @@
 
 #include "dex_loader.hpp"
 #include "logging.hpp"
+#include "remote_preferences.hpp"
 #include "state.hpp"
 #include "target_client.hpp"
 
@@ -57,6 +58,7 @@ void CloseProcessState(ProcessState &state) {
     for (auto &module : state.modules) {
         CloseFd(module.dex_fd);
     }
+    CloseFd(state.companion_fd);
 }
 
 }  // namespace
@@ -94,7 +96,8 @@ public:
         if (state_.process_name.empty()) {
             return;
         }
-        if (!QueryCompanion(api_, state_.process_name, state_)) {
+        if (!QueryCompanion(api_, env_, args, state_.process_name, state_)) {
+            CloseProcessState(state_);
             return;
         }
     }
@@ -109,10 +112,12 @@ public:
         if (!state_.target || env_ == nullptr) {
             return;
         }
+        InitializeRemotePreferences(state_);
         jobject app_loader = CurrentContextClassLoader(env_);
         bool ok = LoadFrameworkAndBootstrap(env_, state_, app_loader);
         CloseProcessState(state_);
         if (!ok) {
+            CloseRemotePreferences();
             ZYGISK_FRAMEWORK_LOGE(ZYGISK_FRAMEWORK_LOG_TAG_NATIVE, "MODULE_ENTRY_FAILED code=POST_BOOTSTRAP_FAILED");
         }
     }

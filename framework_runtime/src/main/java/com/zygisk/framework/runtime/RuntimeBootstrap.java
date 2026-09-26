@@ -46,6 +46,7 @@ public final class RuntimeBootstrap {
             String[] scopeLists) {
         NativeBridge.log(Log.INFO, TAG, "FRAMEWORK_DEX_LOADED process=" + processName);
         NativeBridge.log(Log.INFO, TAG, "NATIVE_BRIDGE_REGISTERED build=" + NativeBridge.getBuildInfo());
+        RemotePreferencesRegistry.getInstance().startListener();
 
         ModuleDescriptor[] descriptors = buildDescriptors(
                 moduleIds,

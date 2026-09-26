@@ -9,8 +9,9 @@
 namespace zygisk_framework {
 
 constexpr uint32_t kProtocolMagic = 0x5a484b31;
-constexpr uint32_t kProtocolVersion = 2;
+constexpr uint32_t kProtocolVersion = 3;
 constexpr uint32_t kOperationQueryProcess = 1;
+constexpr uint32_t kOperationPreferenceUpdate = 2;
 
 /**
  * 通过 Root Companion socket 发送当前进程查询请求。
@@ -57,5 +58,29 @@ bool SendMatchResponse(int socket, const ProcessState &state);
  * @return 读取并校验成功时返回 true
  */
 bool ReceiveProcessQuery(int socket, std::string &process_name);
+
+/**
+ * Companion 向已注入进程发送一个 Remote Preferences 组的完整快照。
+ *
+ * @param socket 已连接目标进程的 socket
+ * @param module_id 快照所属模块 ID
+ * @param group Preferences 组名
+ * @param snapshot 版本化类型数据；空字符串表示组已删除
+ * @return 发送成功时返回 true
+ */
+bool SendPreferenceUpdate(int socket, const std::string &module_id,
+                          const std::string &group, const std::string &snapshot);
+
+/**
+ * 在目标进程中阻塞接收一个 Remote Preferences 更新。
+ *
+ * @param socket 已豁免并保留的 companion socket
+ * @param module_id 输出模块 ID
+ * @param group 输出组名
+ * @param snapshot 输出完整快照
+ * @return 成功收到并校验消息时返回 true；连接关闭或协议错误时返回 false
+ */
+bool ReceivePreferenceUpdate(int socket, std::string &module_id,
+                             std::string &group, std::string &snapshot);
 
 }  // namespace zygisk_framework

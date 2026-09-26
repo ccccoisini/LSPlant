@@ -25,7 +25,7 @@ bool SendAll(int fd, const void *data, size_t size) {
     auto *cursor = static_cast<const uint8_t *>(data);
     size_t left = size;
     while (left > 0) {
-        ssize_t written = TEMP_FAILURE_RETRY(write(fd, cursor, left));
+        ssize_t written = TEMP_FAILURE_RETRY(send(fd, cursor, left, MSG_NOSIGNAL));
         if (written <= 0) {
             return false;
         }
@@ -208,6 +208,11 @@ bool SendMatchResponse(int socket, const ProcessState &state) {
         PutString(payload, module.java_init_list);
         PutString(payload, module.module_prop);
         PutString(payload, module.scope_list);
+        PutU32(payload, static_cast<uint32_t>(module.remote_preferences.size()));
+        for (const auto &[group, snapshot] : module.remote_preferences) {
+            PutString(payload, group);
+            PutString(payload, snapshot);
+        }
     }
     WireHeader header{kProtocolMagic, kProtocolVersion, kOperationQueryProcess, 0,
                       static_cast<uint32_t>(payload.size()), 0};
@@ -265,9 +270,65 @@ bool ReceiveCompanionResponse(int socket, ProcessState &state) {
         }
         module.dex_bytes.assign(module_dex_blob.begin(), module_dex_blob.end());
         module.dex_fd = fds.size() == module_count ? fds[i] : -1;
+        uint32_t group_count = 0;
+        if (!GetU32(payload, offset, group_count) || group_count > 64) {
+            for (size_t j = i; j < fds.size(); ++j) close(fds[j]);
+            return false;
+        }
+        size_t preference_bytes = 0;
+        for (uint32_t group_index = 0; group_index < group_count; ++group_index) {
+            std::string group;
+            std::string snapshot;
+            if (!GetString(payload, offset, group, 128) ||
+                !GetString(payload, offset, snapshot, 1024 * 1024)) {
+                for (size_t j = i; j < fds.size(); ++j) close(fds[j]);
+                return false;
+            }
+            preference_bytes += snapshot.size();
+            if (group.empty() || preference_bytes > 4 * 1024 * 1024 ||
+                !module.remote_preferences.emplace(group, std::move(snapshot)).second) {
+                for (size_t j = i; j < fds.size(); ++j) close(fds[j]);
+                return false;
+            }
+        }
         state.modules.push_back(module);
     }
-    return true;
+    return offset == payload.size();
+}
+
+bool SendPreferenceUpdate(int socket, const std::string &module_id,
+                          const std::string &group, const std::string &snapshot) {
+    if (module_id.empty() || module_id.size() > 512 || group.empty() || group.size() > 128 ||
+        snapshot.size() > 1024 * 1024) {
+        return false;
+    }
+    std::string payload;
+    PutString(payload, module_id);
+    PutString(payload, group);
+    PutString(payload, snapshot);
+    WireHeader header{kProtocolMagic, kProtocolVersion, kOperationPreferenceUpdate, 0,
+                      static_cast<uint32_t>(payload.size()), 0};
+    return SendMessageWithFds(socket, header, payload, {});
+}
+
+bool ReceivePreferenceUpdate(int socket, std::string &module_id,
+                             std::string &group, std::string &snapshot) {
+    WireHeader header{};
+    if (!RecvAll(socket, &header, sizeof(header)) ||
+        header.magic != kProtocolMagic || header.version != kProtocolVersion ||
+        header.operation != kOperationPreferenceUpdate || header.status != 0 ||
+        header.fd_count != 0 || header.payload_size > 1024 * 1024 + 1024) {
+        return false;
+    }
+    std::string payload(header.payload_size, '\0');
+    if (!RecvAll(socket, payload.data(), payload.size())) {
+        return false;
+    }
+    size_t offset = 0;
+    return GetString(payload, offset, module_id, 512) &&
+           GetString(payload, offset, group, 128) &&
+           GetString(payload, offset, snapshot, 1024 * 1024) &&
+           !module_id.empty() && !group.empty() && offset == payload.size();
 }
 
 void CloseFd(int &fd) {

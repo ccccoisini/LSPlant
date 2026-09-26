@@ -129,6 +129,14 @@ public final class NativeBridge {
         return nativeCreateDexClassLoader(dexBuffer, parent);
     }
 
+    static byte[] getRemotePreferencesSnapshot(String moduleId, String group) {
+        return nativeGetRemotePreferencesSnapshot(moduleId, group);
+    }
+
+    static byte[] awaitRemotePreferencesUpdate() {
+        return nativeAwaitRemotePreferencesUpdate();
+    }
+
     /**
      * 输出统一 Tag 日志，并在 JVM 单元测试环境中自动降级到标准错误。
      *
@@ -191,6 +199,10 @@ public final class NativeBridge {
     private static native boolean nativePreloadDexInto(ByteBuffer dexBuffer, ClassLoader classLoader);
 
     private static native ClassLoader nativeCreateDexClassLoader(ByteBuffer dexBuffer, ClassLoader parent);
+
+    private static native byte[] nativeGetRemotePreferencesSnapshot(String moduleId, String group);
+
+    private static native byte[] nativeAwaitRemotePreferencesUpdate();
 
     /**
      * NativeBridge 的测试替身接口，用于 JVM 单元测试覆盖 Hook 链语义。

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <map>
 #include <string>
 #include <vector>
 #include <cstdint>
@@ -16,6 +17,7 @@ struct ModuleDescriptor {
     std::string java_init_list;
     std::string module_prop;
     std::string scope_list;
+    std::map<std::string, std::string> remote_preferences;
 };
 
 /**
@@ -25,6 +27,7 @@ struct ProcessState {
     std::string process_name;
     std::string package_name;
     bool target = false;
+    int companion_fd = -1;
     std::vector<ModuleDescriptor> modules;
 };
 

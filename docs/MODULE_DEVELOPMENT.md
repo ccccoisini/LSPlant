@@ -26,6 +26,10 @@ cd hook_template
 
 入口类必须继承 `io.github.libxposed.api.XposedModule`，提供 public 无参构造方法，并避免在静态初始化里做重 I/O。
 
+模块可在 `onModuleLoaded` 之后调用 `getRemotePreferences("<group>")`。返回对象在 Hook
+进程中只读，支持标准六类 SharedPreferences 值和变更监听器；配置由设备端 root CLI 的
+`prefs` 命令写入，运行中的目标进程无需重启即可收到更新。
+
 构建仓库子模块模板：
 
 ```sh

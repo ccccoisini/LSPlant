@@ -39,6 +39,8 @@ add_library(zygisk_framework SHARED
     companion.cpp
     target_client.cpp
     fd_protocol.cpp
+    preference_store.cpp
+    remote_preferences.cpp
     lsplant_engine.cpp
     art_symbol_resolver.cpp
     dex_loader.cpp

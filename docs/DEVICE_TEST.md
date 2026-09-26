@@ -21,7 +21,7 @@ adb wait-for-device
 ```sh
 ./scripts/verify_device.sh \
   --package io.hammer.developmentenvironmentdetection \
-  --module hammer-demo
+  --module-zip hook_template/dist/example_hook-1.2.0.zip
 ```
 
 成功时报告写入：
@@ -30,4 +30,5 @@ adb wait-for-device
 dist/device-verification-report.txt
 ```
 
-脚本会检查 `TARGET_MATCH`、`LSPLANT_INIT_OK`、`FRAMEWORK_DEX_LOADED`、`MODULE_DEX_LOADED`、`DEMO_HOOK_INSTALLED`、`DEMO_BEFORE`、`DEMO_AFTER`，并验证非目标进程不出现注入日志。
+脚本会检查 `TARGET_MATCH`、`LSPLANT_INIT_OK`、`FRAMEWORK_DEX_LOADED`、`MODULE_DEX_LOADED`、模板生命周期
+Hook、Remote Preferences 初始读取与实时更新，并确认配置更新过程中目标 PID 保持不变。

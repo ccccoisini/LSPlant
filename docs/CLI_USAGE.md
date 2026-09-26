@@ -37,6 +37,13 @@ zygisk_framework scope <module-id> add <target> [target...]
 zygisk_framework scope <module-id> remove <target> [target...]
 zygisk_framework scope <module-id> set <target> [target...]
 zygisk_framework scope <module-id> clear
+zygisk_framework prefs <module-id> <group> list
+zygisk_framework prefs <module-id> <group> get <key>
+zygisk_framework prefs <module-id> <group> set <key> string <value>
+zygisk_framework prefs <module-id> <group> set <key> string-set [value...]
+zygisk_framework prefs <module-id> <group> set <key> int|long|float|boolean <value>
+zygisk_framework prefs <module-id> <group> remove <key>
+zygisk_framework prefs <module-id> <group> clear
 zygisk_framework disable <module-id>
 zygisk_framework enable <module-id>
 zygisk_framework remove <module-id>
@@ -55,9 +62,12 @@ zygisk_framework help
 | `scope <module-id> remove <target> [...]` | 删除一个或多个精确匹配的目标；不存在的目标会提示并跳过。 |
 | `scope <module-id> set <target> [...]` | 用给定目标整体替换当前 scope；至少需要一个目标。 |
 | `scope <module-id> clear` | 清空 scope.list；模块保留安装状态，但不会注入任何新进程。 |
+| `prefs <module-id> <group> list/get` | 查看 Remote Preferences 组或单个键。 |
+| `prefs <module-id> <group> set` | 按显式类型原子写入一个值。 |
+| `prefs <module-id> <group> remove/clear` | 删除单个键或清空整个组。 |
 | `disable <module-id>` | 禁用模块；保留文件，后续新进程不加载该模块。 |
 | `enable <module-id>` | 重新启用已禁用模块。 |
-| `remove <module-id>` | 删除模块及其设备端文件。 |
+| `remove <module-id>` | 删除模块及其 Remote Preferences 数据。 |
 | `version` | 显示 CLI 版本。 |
 | `help` | 显示命令帮助。 |
 
@@ -72,11 +82,11 @@ zygisk_framework help
 
 ```sh
 ./gradlew packageHookModule
-adb push dist/example_hook-1.1.0.zip /sdcard/Download/
-adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework install /sdcard/Download/example_hook-1.1.0.zip'
+adb push dist/example_hook-1.2.0.zip /sdcard/Download/
+adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework install /sdcard/Download/example_hook-1.2.0.zip'
 ```
 
-`example_hook-1.1.0.zip` 只是示例名称，请替换为实际产物。CLI 不根据文件名推断模块身份，最终安装目录
+`example_hook-1.2.0.zip` 只是示例名称，请替换为实际产物。CLI 不根据文件名推断模块身份，最终安装目录
 由包内 `META-INF/xposed/module.prop` 的 `id` 决定。再次安装相同或更高 `versionCode` 会替换现有版本；
 较低版本默认拒绝，确认需要降级时加 `--force`：
 
@@ -101,6 +111,27 @@ META-INF/xposed/scope.list
 ZIP、缺失元数据、无效 ID、API 范围不兼容或 checksum 不匹配时，安装会失败。CLI 使用模块目录内的暂存和
 备份目录完成替换；验证或替换失败时会清理暂存内容，并尝试恢复之前安装的版本。并发模块操作由锁串行化。
 
+## Remote Preferences
+
+Preferences 只允许 root CLI 写入，Hook 进程通过 API 102 的 `getRemotePreferences(group)` 取得只读
+`SharedPreferences`。支持 `string`、`string-set`、`int`、`long`、`float` 和 `boolean`：
+
+```sh
+adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework prefs example_hook settings set enabled boolean true'
+adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework prefs example_hook settings set android_id string 0123456789abcdef'
+adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework prefs example_hook settings set targets string-set alpha beta'
+adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework prefs example_hook settings get enabled'
+adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework prefs example_hook settings list'
+```
+
+写入、删除和清空使用 root-only 临时文件原子替换。已运行的目标进程通过 Root Companion 长连接收到整组
+快照，已注册的 `OnSharedPreferenceChangeListener` 会在框架后台线程收到真正发生变化的键；不需要重启
+应用。连接异常时保留最后一次有效快照，不影响 Hook 主链路。
+
+数据位于 `/data/adb/zygisk_framework/data/<module-id>/preferences/`。同 ID 模块升级或强制降级不会覆盖
+配置；`remove <module-id>` 会删除配置。单组最大 1 MiB、每模块最多 64 组且总计最大 4 MiB，单个字符串
+或字符串集合成员最大 64 KiB。
+
 ## 查看、启停和删除示例
 
 ```sh
@@ -116,9 +147,9 @@ adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework enable example_
 adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework remove example_hook'
 ```
 
-禁用、启用、安装和删除只影响之后启动的进程；CLI 不会主动结束正在运行的 App。要让变更作用于目标
-应用，请自行停止并重新启动该应用。模块是否会在进程中加载，还取决于 `scope.list` 是否包含该应用包名或
-对应进程名。
+禁用、启用、安装、scope 修改和删除只影响之后启动的进程；CLI 不会主动结束正在运行的 App。要让这些
+变更作用于目标应用，请自行停止并重新启动该应用。模块是否会在进程中加载，还取决于 `scope.list` 是否
+包含该应用包名或对应进程名。`prefs` 是例外：它会实时通知仍在运行且已加载该模块的进程。
 
 scope 目标使用精确包名或进程名。与框架运行时的匹配规则一致：不含冒号的包名也会匹配它的子进程
 （例如 `com.example.app:remote`）；带冒号的进程名只匹配该进程。scope 修改通过同目录临时文件原子替换，

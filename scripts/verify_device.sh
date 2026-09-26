@@ -28,7 +28,7 @@ while [ $# -gt 0 ]; do
 done
 
 if [ -z "$MODULE_ZIP" ]; then
-  MODULE_ZIP="$ROOT_DIR/hook_template/dist/example_hook-1.1.0.zip"
+  MODULE_ZIP="$ROOT_DIR/hook_template/dist/example_hook-1.2.0.zip"
 fi
 if [ ! -s "$MODULE_ZIP" ]; then
   echo "Missing module ZIP: $MODULE_ZIP. Build it with hook_template/gradlew packageHookModule." >&2
@@ -113,19 +113,74 @@ fi
 run_adb push "$MODULE_ZIP" "/sdcard/Download/zygisk-framework-module.zip" >/dev/null
 run_root "/data/adb/zygisk_framework/bin/zygisk_framework install /sdcard/Download/zygisk-framework-module.zip"
 run_root "/data/adb/zygisk_framework/bin/zygisk_framework info $MODULE_ID"
+run_root "/data/adb/zygisk_framework/bin/zygisk_framework prefs $MODULE_ID settings set enabled boolean false"
+run_root "/data/adb/zygisk_framework/bin/zygisk_framework prefs $MODULE_ID settings set android_id string 0123456789abcdef"
+run_root "/data/adb/zygisk_framework/bin/zygisk_framework prefs $MODULE_ID verification set int_value int 42"
+run_root "/data/adb/zygisk_framework/bin/zygisk_framework prefs $MODULE_ID verification set long_value long 9223372036854775807"
+run_root "/data/adb/zygisk_framework/bin/zygisk_framework prefs $MODULE_ID verification set float_value float 1.25"
+run_root "/data/adb/zygisk_framework/bin/zygisk_framework prefs $MODULE_ID verification set set_value string-set alpha beta"
+run_root "/data/adb/zygisk_framework/bin/zygisk_framework prefs $MODULE_ID verification list"
+SPECIAL_OUTPUT="$(run_root "/data/adb/zygisk_framework/bin/zygisk_framework prefs $MODULE_ID verification set special_text string 'spaces + slash / equals ='; /data/adb/zygisk_framework/bin/zygisk_framework prefs $MODULE_ID verification get special_text")"
+if printf '%s\n' "$SPECIAL_OUTPUT" | grep -Fq $'string\tspecial_text\tspaces + slash / equals ='; then
+  record "PASS preferences_special_text_round_trip=true"
+else
+  record "FAIL preferences_special_text_round_trip=false"
+  exit 1
+fi
+if run_root "/data/adb/zygisk_framework/bin/zygisk_framework prefs $MODULE_ID verification get missing_key"; then
+  record "FAIL preferences_missing_key_nonzero=false"
+  exit 1
+else
+  record "PASS preferences_missing_key_nonzero=true"
+fi
+if run_root "/data/adb/zygisk_framework/bin/zygisk_framework prefs $MODULE_ID verification set bad_boolean boolean yes"; then
+  record "FAIL preferences_type_validation=false"
+  exit 1
+else
+  record "PASS preferences_type_validation=true"
+fi
+run_root "/data/adb/zygisk_framework/bin/zygisk_framework prefs $MODULE_ID verification remove special_text"
+run_root "/data/adb/zygisk_framework/bin/zygisk_framework prefs $MODULE_ID verification remove special_text"
+run_root "/data/adb/zygisk_framework/bin/zygisk_framework prefs $MODULE_ID verification clear"
+run_root "/data/adb/zygisk_framework/bin/zygisk_framework prefs $MODULE_ID verification clear"
+
+# 同版本覆盖安装必须保留独立的数据目录。
+run_root "/data/adb/zygisk_framework/bin/zygisk_framework install /sdcard/Download/zygisk-framework-module.zip"
+run_root "/data/adb/zygisk_framework/bin/zygisk_framework scope $MODULE_ID set $PACKAGE"
+PREF_AFTER_UPGRADE="$(run_root "/data/adb/zygisk_framework/bin/zygisk_framework prefs $MODULE_ID settings get enabled")"
+if printf '%s\n' "$PREF_AFTER_UPGRADE" | grep -Fq $'boolean\tenabled\tfalse'; then
+  record "PASS preferences_preserved_on_upgrade=true"
+else
+  record "FAIL preferences_preserved_on_upgrade=false"
+  exit 1
+fi
 
 run_adb shell am force-stop "$PACKAGE" >/dev/null || true
 run_adb logcat -c
+FAIL=0
 run_adb shell monkey -p "$PACKAGE" -c android.intent.category.LAUNCHER 1 >/dev/null
 sleep 5
-PID="$(run_adb shell pidof "$PACKAGE" | tr -d '\r' || true)"
-record "targetPid=$PID"
+PID_BEFORE="$(run_adb shell pidof "$PACKAGE" | tr -d '\r' || true)"
+record "targetPidBeforePrefsUpdate=$PID_BEFORE"
+
+run_root "/data/adb/zygisk_framework/bin/zygisk_framework prefs $MODULE_ID settings set enabled boolean true"
+run_root "/data/adb/zygisk_framework/bin/zygisk_framework prefs $MODULE_ID settings set android_id string fedcba9876543210"
+sleep 2
+run_adb shell monkey -p "$PACKAGE" -c android.intent.category.LAUNCHER 1 >/dev/null
+sleep 3
+PID_AFTER="$(run_adb shell pidof "$PACKAGE" | tr -d '\r' || true)"
+record "targetPidAfterPrefsUpdate=$PID_AFTER"
+if [ -n "$PID_BEFORE" ] && [ "$PID_BEFORE" = "$PID_AFTER" ]; then
+  record "PASS preferences_update_kept_pid=true"
+else
+  record "FAIL preferences_update_kept_pid=false"
+  FAIL=1
+fi
 
 LOG_FILE="$(mktemp)"
-run_adb logcat -d -s zygisk_framework.Native:V zygisk_framework.Runtime:V zygisk_framework.Module:V zygisk_framework.Companion:V AndroidRuntime:E > "$LOG_FILE"
+run_adb logcat -d -s zygisk_framework.Native:V zygisk_framework.Runtime:V zygisk_framework.Module:V zygisk_framework.Companion:V HookTemplate:V HookTemplate.AndroidId:V AndroidRuntime:E > "$LOG_FILE"
 cat "$LOG_FILE" >> "$REPORT"
 
-FAIL=0
 require_marker "TARGET_MATCH process=$PACKAGE" || FAIL=1
 require_marker "MODULE_SCOPE_MATCH id=$MODULE_ID process=$PACKAGE" || FAIL=1
 require_marker "LSPLANT_INIT_OK" || FAIL=1
@@ -136,6 +191,16 @@ require_marker "MODULE_ENTRY_LOADED" || FAIL=1
 require_marker "TEMPLATE_HOOK_INSTALLED package=$PACKAGE" || FAIL=1
 require_marker "TEMPLATE_HOOK_BEFORE package=$PACKAGE" || FAIL=1
 require_marker "TEMPLATE_HOOK_AFTER package=$PACKAGE" || FAIL=1
+require_marker "REMOTE_PREFS_READY group=settings" || FAIL=1
+if grep -Fq "REMOTE_PREFS_DEGRADED reason=SOCKET_EXEMPT_FAILED" "$LOG_FILE"; then
+  record "FAIL remote_preferences_live_channel=false reason=SOCKET_EXEMPT_FAILED"
+  FAIL=1
+else
+  require_marker "REMOTE_PREFS_UPDATE id=$MODULE_ID group=settings" || FAIL=1
+  require_marker "REMOTE_PREFS_CHANGED key=enabled" || FAIL=1
+  require_marker "REMOTE_PREFS_CHANGED key=android_id" || FAIL=1
+  require_marker "REMOTE_PREFS_APPLIED key=android_id" || FAIL=1
+fi
 
 if grep -E 'FATAL EXCEPTION|Fatal signal|Abort message' "$LOG_FILE" >/dev/null; then
   record "FAIL crash_marker_present=true"
@@ -147,6 +212,12 @@ fi
 run_root "/data/adb/zygisk_framework/bin/zygisk_framework disable $MODULE_ID"
 run_root "/data/adb/zygisk_framework/bin/zygisk_framework enable $MODULE_ID"
 run_root "/data/adb/zygisk_framework/bin/zygisk_framework remove $MODULE_ID"
+if run_root "test ! -e /data/adb/zygisk_framework/data/$MODULE_ID"; then
+  record "PASS preferences_removed_with_module=true"
+else
+  record "FAIL preferences_removed_with_module=false"
+  FAIL=1
+fi
 
 if [ "$FAIL" -eq 0 ]; then
   record "REAL_DEVICE_HOOK_ACCEPTANCE: PASS"

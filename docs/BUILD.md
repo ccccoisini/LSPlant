@@ -32,7 +32,7 @@ Native 产物只构建 arm64：
 
 - `native_loader/build/intermediates/cmake/release/obj/arm64-v8a/libzygisk_framework.so`
 
-框架 Magisk ZIP 中包含 `zygisk/*.so`、设备端 CLI 和框架元数据，不再内置业务模块。安装脚本会把 CLI 安装到 `/data/adb/zygisk_framework/bin/zygisk_framework`；业务模块由 CLI 安装到 `/data/adb/zygisk_framework/modules/`。框架卸载会删除整个 `/data/adb/zygisk_framework` 数据目录。`framework.dex`/`framework.mapping` 仅保留在根 `dist/` 目录用于调试，不作为运行时文件下发。
+框架 Magisk ZIP 中包含 `zygisk/*.so`、设备端 CLI 和框架元数据，不再内置业务模块。安装脚本会把 CLI 安装到 `/data/adb/zygisk_framework/bin/zygisk_framework`；业务模块由 CLI 安装到 `/data/adb/zygisk_framework/modules/`，Remote Preferences 保存在 root-only 的 `/data/adb/zygisk_framework/data/`。框架卸载会删除整个 `/data/adb/zygisk_framework` 数据目录。`framework.dex`/`framework.mapping` 仅保留在根 `dist/` 目录用于调试，不作为运行时文件下发。
 
 检查动态依赖：
 

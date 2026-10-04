@@ -82,16 +82,16 @@ zygisk_framework help
 
 ```sh
 ./gradlew packageHookModule
-adb push dist/example_hook-1.2.0.zip /sdcard/Download/
-adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework install /sdcard/Download/example_hook-1.2.0.zip'
+adb push dist/example_hook-1.3.0.zip /sdcard/Download/
+adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework install /sdcard/Download/example_hook-1.3.0.zip'
 ```
 
-`example_hook-1.2.0.zip` 只是示例名称，请替换为实际产物。CLI 不根据文件名推断模块身份，最终安装目录
+`example_hook-1.3.0.zip` 只是示例名称，请替换为实际产物。CLI 不根据文件名推断模块身份，最终安装目录
 由包内 `META-INF/xposed/module.prop` 的 `id` 决定。再次安装相同或更高 `versionCode` 会替换现有版本；
 较低版本默认拒绝，确认需要降级时加 `--force`：
 
 ```sh
-adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework install /sdcard/Download/example_hook-1.2.0.zip --force'
+adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework install /sdcard/Download/example_hook-1.3.0.zip --force'
 ```
 
 ## 模块包校验与安全边界
@@ -117,15 +117,16 @@ Preferences 只允许 root CLI 写入，Hook 进程通过 API 102 的 `getRemote
 `SharedPreferences`。支持 `string`、`string-set`、`int`、`long`、`float` 和 `boolean`：
 
 ```sh
-adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework prefs example_hook settings.com.example.target set enabled boolean true'
-adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework prefs example_hook settings.com.example.target set android_id string 0123456789abcdef'
-adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework prefs example_hook settings.com.example.target set targets string-set alpha beta'
-adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework prefs example_hook settings.com.example.target get enabled'
-adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework prefs example_hook settings.com.example.target list'
+adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework prefs example_hook verification set boolean_value boolean true'
+adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework prefs example_hook verification set string_value string demo-value'
+adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework prefs example_hook verification set targets string-set alpha beta'
+adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework prefs example_hook verification get boolean_value'
+adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework prefs example_hook verification list'
 ```
 
-模板约定每个目标 App 使用 `settings.<packageName>` group。这样同一模块同时 Hook 多个 App 时可以分别
-配置；框架仍允许模块按自身需求使用任意合法 group 名称。
+需要按 App 区分业务配置时，可使用 `settings.<packageName>` group；框架允许任意合法 group 名称。
+以上命令验证 CLI 存储能力。默认 hook_template 使用编译时固定 Android ID/GAID，不订阅远程配置，
+因此写入这些键不会改变模板 Hook 的返回值。
 
 写入、删除和清空使用 root-only 临时文件原子替换。目标在 specialize 前创建 memfd，Root Companion
 打开并初始化后，目标仅保留只读映射；后续通过 inotify、完整模块快照和 futex 通知已运行的目标进程，

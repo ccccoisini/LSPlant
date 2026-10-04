@@ -7,4 +7,4 @@ if [ "${1:-}" = "--serial" ] && [ -n "${2:-}" ]; then
 fi
 
 adb "${SERIAL_ARG[@]}" logcat -d \
-  -s zygisk_framework.Native:V zygisk_framework.Runtime:V zygisk_framework.Module:V zygisk_framework.Companion:V AndroidRuntime:E
+  -s ZH.Native:V ZH.Runtime:V ZH.Companion:V zygisk_framework.Native:V zygisk_framework.Runtime:V zygisk_framework.Module:V zygisk_framework.Companion:V HookTemplate:V HookTemplate.AndroidId:V HookTemplate.Gaid:V AndroidRuntime:E

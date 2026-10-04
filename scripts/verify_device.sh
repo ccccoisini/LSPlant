@@ -52,6 +52,7 @@ if [[ ! "$PACKAGE" =~ ^[A-Za-z0-9_][A-Za-z0-9_.:$-]*$ ]]; then
   echo "Invalid package/process name: $PACKAGE" >&2
   exit 2
 fi
+PREFERENCES_GROUP="settings.$PACKAGE"
 REPORT="$ROOT_DIR/dist/device-verification-report.txt"
 mkdir -p "$ROOT_DIR/dist"
 : > "$REPORT"
@@ -110,6 +111,7 @@ record "abi=$ABI"
 record "rootManager=$ROOT_MANAGER"
 record "moduleId=$MODULE_ID"
 record "targetPackage=$PACKAGE"
+record "preferencesGroup=$PREFERENCES_GROUP"
 
 TRANSPORT_TEST="$(find "$ROOT_DIR/native_loader/build/intermediates/cxx" \
   -type f -name remote_preferences_transport_test -print 2>/dev/null | head -n 1)"
@@ -136,8 +138,8 @@ fi
 run_adb push "$MODULE_ZIP" "/sdcard/Download/zygisk-framework-module.zip" >/dev/null
 run_root "/data/adb/zygisk_framework/bin/zygisk_framework install /sdcard/Download/zygisk-framework-module.zip"
 run_root "/data/adb/zygisk_framework/bin/zygisk_framework info $MODULE_ID"
-run_root "/data/adb/zygisk_framework/bin/zygisk_framework prefs $MODULE_ID settings set enabled boolean false"
-run_root "/data/adb/zygisk_framework/bin/zygisk_framework prefs $MODULE_ID settings set android_id string 0123456789abcdef"
+run_root "/data/adb/zygisk_framework/bin/zygisk_framework prefs $MODULE_ID $PREFERENCES_GROUP set enabled boolean false"
+run_root "/data/adb/zygisk_framework/bin/zygisk_framework prefs $MODULE_ID $PREFERENCES_GROUP set android_id string 0123456789abcdef"
 run_root "/data/adb/zygisk_framework/bin/zygisk_framework prefs $MODULE_ID verification set int_value int 42"
 run_root "/data/adb/zygisk_framework/bin/zygisk_framework prefs $MODULE_ID verification set long_value long 9223372036854775807"
 run_root "/data/adb/zygisk_framework/bin/zygisk_framework prefs $MODULE_ID verification set float_value float 1.25"
@@ -170,7 +172,7 @@ run_root "/data/adb/zygisk_framework/bin/zygisk_framework prefs $MODULE_ID verif
 # 同版本覆盖安装必须保留独立的数据目录。
 run_root "/data/adb/zygisk_framework/bin/zygisk_framework install /sdcard/Download/zygisk-framework-module.zip"
 run_root "/data/adb/zygisk_framework/bin/zygisk_framework scope $MODULE_ID set $PACKAGE"
-PREF_AFTER_UPGRADE="$(run_root "/data/adb/zygisk_framework/bin/zygisk_framework prefs $MODULE_ID settings get enabled")"
+PREF_AFTER_UPGRADE="$(run_root "/data/adb/zygisk_framework/bin/zygisk_framework prefs $MODULE_ID $PREFERENCES_GROUP get enabled")"
 if printf '%s\n' "$PREF_AFTER_UPGRADE" | grep -Fq $'boolean\tenabled\tfalse'; then
   record "PASS preferences_preserved_on_upgrade=true"
 else
@@ -187,10 +189,10 @@ sleep 5
 PID_BEFORE="$(run_adb shell pidof "$PACKAGE" | tr -d '\r' || true)"
 record "targetPidBeforePrefsUpdate=$PID_BEFORE"
 
-run_root "/data/adb/zygisk_framework/bin/zygisk_framework prefs $MODULE_ID settings set enabled boolean false"
-run_root "/data/adb/zygisk_framework/bin/zygisk_framework prefs $MODULE_ID settings set android_id string 1111111111111111"
-run_root "/data/adb/zygisk_framework/bin/zygisk_framework prefs $MODULE_ID settings set enabled boolean true"
-run_root "/data/adb/zygisk_framework/bin/zygisk_framework prefs $MODULE_ID settings set android_id string fedcba9876543210"
+run_root "/data/adb/zygisk_framework/bin/zygisk_framework prefs $MODULE_ID $PREFERENCES_GROUP set enabled boolean false"
+run_root "/data/adb/zygisk_framework/bin/zygisk_framework prefs $MODULE_ID $PREFERENCES_GROUP set android_id string 1111111111111111"
+run_root "/data/adb/zygisk_framework/bin/zygisk_framework prefs $MODULE_ID $PREFERENCES_GROUP set enabled boolean true"
+run_root "/data/adb/zygisk_framework/bin/zygisk_framework prefs $MODULE_ID $PREFERENCES_GROUP set android_id string fedcba9876543210"
 sleep 2
 run_adb shell am start -W -n "$LAUNCHER_COMPONENT" -f 0x10008000 >/dev/null
 sleep 3
@@ -225,7 +227,7 @@ require_marker "MODULE_ENTRY_LOADED" || FAIL=1
 require_marker "TEMPLATE_HOOK_INSTALLED package=$PACKAGE" || FAIL=1
 require_marker "TEMPLATE_HOOK_BEFORE package=$PACKAGE" || FAIL=1
 require_marker "TEMPLATE_HOOK_AFTER package=$PACKAGE" || FAIL=1
-require_marker "REMOTE_PREFS_READY group=settings" || FAIL=1
+require_marker "REMOTE_PREFS_READY group=$PREFERENCES_GROUP package=$PACKAGE" || FAIL=1
 require_marker "REMOTE_PREFS_CHANNEL_READY mode=SHARED_MEMORY" || FAIL=1
 if grep -Fq "REMOTE_PREFS_DEGRADED reason=SOCKET_EXEMPT_FAILED" "$LOG_FILE"; then
   record "FAIL obsolete_socket_channel_detected=true"
@@ -233,7 +235,7 @@ if grep -Fq "REMOTE_PREFS_DEGRADED reason=SOCKET_EXEMPT_FAILED" "$LOG_FILE"; the
 else
   record "PASS obsolete_socket_channel_detected=false"
 fi
-require_marker "REMOTE_PREFS_UPDATE id=$MODULE_ID group=settings" || FAIL=1
+require_marker "REMOTE_PREFS_UPDATE id=$MODULE_ID group=$PREFERENCES_GROUP" || FAIL=1
 require_marker "REMOTE_PREFS_CHANGED key=enabled" || FAIL=1
 require_marker "REMOTE_PREFS_CHANGED key=android_id" || FAIL=1
 require_marker "REMOTE_PREFS_APPLIED key=android_id" || FAIL=1

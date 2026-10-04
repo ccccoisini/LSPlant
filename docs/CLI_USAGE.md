@@ -117,12 +117,15 @@ Preferences 只允许 root CLI 写入，Hook 进程通过 API 102 的 `getRemote
 `SharedPreferences`。支持 `string`、`string-set`、`int`、`long`、`float` 和 `boolean`：
 
 ```sh
-adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework prefs example_hook settings set enabled boolean true'
-adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework prefs example_hook settings set android_id string 0123456789abcdef'
-adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework prefs example_hook settings set targets string-set alpha beta'
-adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework prefs example_hook settings get enabled'
-adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework prefs example_hook settings list'
+adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework prefs example_hook settings.com.example.target set enabled boolean true'
+adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework prefs example_hook settings.com.example.target set android_id string 0123456789abcdef'
+adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework prefs example_hook settings.com.example.target set targets string-set alpha beta'
+adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework prefs example_hook settings.com.example.target get enabled'
+adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework prefs example_hook settings.com.example.target list'
 ```
+
+模板约定每个目标 App 使用 `settings.<packageName>` group。这样同一模块同时 Hook 多个 App 时可以分别
+配置；框架仍允许模块按自身需求使用任意合法 group 名称。
 
 写入、删除和清空使用 root-only 临时文件原子替换。目标在 specialize 前创建 memfd，Root Companion
 打开并初始化后，目标仅保留只读映射；后续通过 inotify、完整模块快照和 futex 通知已运行的目标进程，

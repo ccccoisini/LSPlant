@@ -30,6 +30,10 @@ cd hook_template
 进程中只读，支持标准六类 SharedPreferences 值和变更监听器；配置由设备端 root CLI 的
 `prefs` 命令写入，运行中的目标进程无需重启即可收到更新。
 
+同一模块需要分别配置多个目标 App 时，建议在 `onPackageReady` 获得包名后使用
+`getRemotePreferences("settings.${packageName}")`，并让 CLI 写入相同 group。`hook_template` 已采用这个
+约定；不同包的实例、缓存和监听通知相互隔离。
+
 实时通道在 specialize 前由目标创建 memfd，再由 Root Companion 打开并初始化；目标只保留只读映射，
 specialize 后不保留 companion socket 或共享内存 FD，也不要求 Zygisk 支持 `exemptFd()`。连续快速提交
 可能合并中间版本；监听器始终按上次已观察

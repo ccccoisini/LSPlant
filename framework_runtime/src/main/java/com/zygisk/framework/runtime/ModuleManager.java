@@ -12,7 +12,7 @@ import java.util.List;
 import io.github.libxposed.api.XposedModule;
 
 final class ModuleManager {
-    private static final String TAG = "zygisk_framework.Runtime";
+    private static final String TAG = "ZH.Runtime";
 
     private final HookRegistry hookRegistry = new HookRegistry();
     private final ArrayList<LoadedModule> modules = new ArrayList<LoadedModule>();

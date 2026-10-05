@@ -78,7 +78,7 @@ native transport、CLI 类型/幂等/升级保留及测试模块移除检查通�
 
 模板 35 个 JVM 测试和父仓库 GAID 判定的 8 个测试通过。
 
-## 1.4.0 验证记录
+## 1.4.0 首次验证记录
 
 2026-10-05 在相同 Samsung SM-F7310、Android 15/API 35、KernelSU 设备，以
 io.hammer.developmentenvironmentdetection 运行 --require-gaid --check-remote-preferences 验收成功。
@@ -100,5 +100,17 @@ native transport、CLI 检查、无崩溃和测试模块移除检查通过。
 ```sh
 python3 -B -m unittest discover -s scripts/tests -v
 ```
+
+## 配置字段扩展与中文日志验证记录
+
+2026-10-05 在同一设备和目标应用再次运行 --require-gaid --check-remote-preferences，验收通过。
+确认初始化日志包含“配置初始化读取成功”，数据变化日志包含“配置数据发生变化”及具体字段的旧值、新值。
+四个更新阶段 PID 均保持为 28558，默认标识实际替换和测试模块清理检查通过。
+自定义值的实际替换仍为 NOT_VERIFIED，目标在更新期间没有再次读取标识。
+
+模板 63 个 JVM 测试、父仓库 20 个日志判定测试及中文公共注释检查通过。
+新增测试覆盖六种配置类型的字段扩展、校验回退、集合不可变性、中文变化日志和日志文本与机器字段的隔离。
+重新构建后的 Release DEX 为 44664 字节、91 个类，入口为 zhm.o1；单 DEX、入口公共无参构造、
+混淆映射、校验和以及 API/测试夹具未打包检查通过。
 
 其他设备、Android 版本和 GAID 动态加载/内联路径需分别验收。

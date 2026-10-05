@@ -36,6 +36,19 @@ class RemoteConfigEventTest(unittest.TestCase):
     def test_complete_update_passes(self):
         self.check_events(event(), "PASS remote_preferences=REMOTE_CONFIG_UPDATED")
 
+    def test_chinese_descriptions_preserve_machine_field_matching(self):
+        chinese_event = event().rstrip("\n") + " 配置数据发生变化：标识替换开关(enabled)：关闭 → 开启\n"
+        self.check_events(chinese_event, "PASS remote_preferences=REMOTE_CONFIG_UPDATED")
+
+    def test_future_text_field_description_cannot_override_machine_values(self):
+        chinese_event = event().rstrip("\n") + " 配置数据发生变化：提示文本(message)：旧文本 → enabled=false gaid=other group=other\n"
+        self.check_events(chinese_event, "PASS remote_preferences=REMOTE_CONFIG_UPDATED")
+
+    def test_chinese_description_cannot_fill_missing_machine_fields(self):
+        incomplete = event().replace(f"android_id={ANDROID_ID} ", "")
+        incomplete = incomplete.rstrip("\n") + f" 配置数据发生变化：提示文本(message)：android_id={ANDROID_ID}\n"
+        self.check_events(incomplete, "FAIL remote_preferences=UNEXPECTED_SNAPSHOT")
+
     def test_loaded_snapshot_cannot_prove_update(self):
         self.check_events(event(marker="REMOTE_CONFIG_LOADED"), "FAIL remote_preferences=SNAPSHOT_NOT_OBSERVED")
 

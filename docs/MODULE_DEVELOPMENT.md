@@ -38,6 +38,9 @@ HookInstaller 安装统一 before/after/replace 回调。完整接口与 Kotlin/
 监听通知相互隔离。模板在 onPackageReady 中调用 ModuleConfig.initialize(context)，
 由 config/ModuleConfig.kt 统一接收更新并发布不可变 ConfigSnapshot。业务在每次回调中调用
 ModuleConfig.snapshot(packageName)，Kotlin 读取属性，Java 使用 getEnabled/getAndroidId/getGaid。
+新增配置字段时，在 ConfigSnapshot 定义属性和默认值，再在 ModuleConfig 的字段表登记键名、中文名称、
+解析规则和属性更新方式；读取、回退与日志由 ConfigSchema 自动处理，不需要修改订阅或刷新流程。
+初始化日志展示完整配置，变化日志以中文展示具体字段的“旧值 → 新值”，异常也附带中文说明。
 默认 enabled=true，android_id 为 16 位零值，gaid 为零 UUID；默认值集中在 DemoIdentifiers.kt。
 enabled=false 时两个标识 Hook 透传，生命周期日志继续输出。删除键恢复默认值，类型/格式错误保留该键
 上次有效值，读取/订阅失败保留快照或使用初始默认值。配置持久化由 CLI/框架负责，目标应用不能 edit 写入。

@@ -12,18 +12,20 @@ verify_remote_config_snapshot() {
   if awk -v marker="$marker" -v expected_group="$group" -v expected_package="$package" \
     -v expected_enabled="$enabled" -v expected_android_id="$android_id" -v expected_gaid="$gaid" '
     {
-      has_marker=0; group_value=""; package_value=""; process_value="";
+      has_marker=0; in_description=0; group_value=""; package_value=""; process_value="";
       enabled_value=""; android_id_value=""; gaid_value="";
       for (i=1; i<=NF; i++) {
         if ($i == marker) has_marker=1;
+        # 中文描述可包含带空格的配置文本，只有描述前的字段属于机器快照。
+        if ($i ~ /^配置初始化读取成功：/ || $i ~ /^配置数据发生变化：/) in_description=1;
         separator=index($i, "=");
         key=substr($i, 1, separator-1); value=substr($i, separator+1);
-        if (key == "group") group_value=value;
+        if (!in_description && key == "group") group_value=value;
         if (key == "package") package_value=value;
         if (key == "process") process_value=value;
-        if (key == "enabled") enabled_value=value;
-        if (key == "android_id") android_id_value=value;
-        if (key == "gaid") gaid_value=value;
+        if (!in_description && key == "enabled") enabled_value=value;
+        if (!in_description && key == "android_id") android_id_value=value;
+        if (!in_description && key == "gaid") gaid_value=value;
       }
       if (has_marker && group_value == expected_group && package_value == expected_package &&
           process_value == expected_package) {

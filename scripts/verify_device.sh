@@ -3,9 +3,11 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 source "$ROOT_DIR/scripts/verify_gaid_events.sh"
+source "$ROOT_DIR/scripts/verify_remote_config_events.sh"
 PACKAGE=""
 MODULE_ZIP=""
 REQUIRE_GAID=false
+CHECK_REMOTE_PREFERENCES=false
 SERIAL_ARG=()
 
 while [ $# -gt 0 ]; do
@@ -26,9 +28,14 @@ while [ $# -gt 0 ]; do
       REQUIRE_GAID=true
       shift
       ;;
+    --check-remote-preferences)
+      CHECK_REMOTE_PREFERENCES=true
+      shift
+      ;;
     --help)
-      echo "Usage: $0 --package APP [--serial SERIAL] [--module-zip ZIP] [--require-gaid]"
+      echo "Usage: $0 --package APP [--serial SERIAL] [--module-zip ZIP] [--require-gaid] [--check-remote-preferences]"
       echo "--require-gaid requires a GAID_HOOK_APPLIED event; installation alone is insufficient."
+      echo "--check-remote-preferences checks live configuration updates and an unchanged target PID."
       exit 0
       ;;
     *)
@@ -39,7 +46,7 @@ while [ $# -gt 0 ]; do
 done
 
 if [ -z "$MODULE_ZIP" ]; then
-  MODULE_ZIP="$ROOT_DIR/hook_template/dist/example_hook-1.3.0.zip"
+  MODULE_ZIP="$ROOT_DIR/hook_template/dist/example_hook-1.4.0.zip"
 fi
 if [ ! -s "$MODULE_ZIP" ]; then
   echo "Missing module ZIP: $MODULE_ZIP. Build it with hook_template/gradlew packageHookModule." >&2
@@ -64,6 +71,7 @@ if [[ ! "$PACKAGE" =~ ^[A-Za-z0-9_][A-Za-z0-9_.:$-]*$ ]]; then
   exit 2
 fi
 PREFERENCES_GROUP="verification"
+TEMPLATE_GROUP="settings.$PACKAGE"
 REPORT="$ROOT_DIR/dist/device-verification-report.txt"
 mkdir -p "$ROOT_DIR/dist"
 : > "$REPORT"
@@ -102,6 +110,35 @@ require_marker() {
   fi
 }
 
+capture_logs() {
+  run_adb logcat -d -s ZH.Native:V ZH.Runtime:V ZH.Companion:V zygisk_framework.Native:V zygisk_framework.Runtime:V zygisk_framework.Module:V zygisk_framework.Companion:V HookTemplate:V HookTemplate.Config:V HookTemplate.AndroidId:V HookTemplate.Gaid:V AndroidRuntime:E > "$LOG_FILE"
+}
+
+wait_remote_config() {
+  local phase="$1"
+  local enabled="$2"
+  local android_id="$3"
+  local gaid="$4"
+  local deadline=$((SECONDS + 15))
+  local current_pid
+  local result
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    current_pid="$(run_adb shell pidof "$PACKAGE" | tr -d '\r' || true)"
+    if [ -z "$TARGET_PID" ] || [ "$current_pid" != "$TARGET_PID" ]; then
+      record "FAIL remote_preferences=PID_CHANGED phase=$phase before=$TARGET_PID after=$current_pid"
+      return 1
+    fi
+    capture_logs
+    if result="$(verify_remote_config_snapshot "$LOG_FILE" REMOTE_CONFIG_UPDATED "$TEMPLATE_GROUP" "$PACKAGE" "$enabled" "$android_id" "$gaid")"; then
+      record "$result phase=$phase pid=$current_pid"
+      return 0
+    fi
+    sleep 1
+  done
+  record "$result phase=$phase"
+  return 1
+}
+
 command -v adb >/dev/null
 run_adb get-state >/dev/null
 LAUNCHER_COMPONENT="$(run_adb shell cmd package resolve-activity --brief \
@@ -124,6 +161,7 @@ record "moduleId=$MODULE_ID"
 record "targetPackage=$PACKAGE"
 record "preferencesGroup=$PREFERENCES_GROUP"
 record "requireGaid=$REQUIRE_GAID"
+record "checkRemotePreferences=$CHECK_REMOTE_PREFERENCES"
 
 TRANSPORT_TEST="$(find "$ROOT_DIR/native_loader/build/intermediates/cxx" \
   -type f -name remote_preferences_transport_test -print 2>/dev/null | head -n 1)"
@@ -193,6 +231,8 @@ else
   exit 1
 fi
 
+# 标识验收从默认配置开始，独立 verification 组不控制业务行为。
+run_root "/data/adb/zygisk_framework/bin/zygisk_framework prefs $MODULE_ID $TEMPLATE_GROUP clear"
 run_adb shell am force-stop "$PACKAGE" >/dev/null || true
 run_adb logcat -c
 FAIL=0
@@ -208,7 +248,7 @@ fi
 
 LOG_FILE="$(mktemp)"
 trap 'rm -f "$LOG_FILE"' EXIT
-run_adb logcat -d -s ZH.Native:V ZH.Runtime:V ZH.Companion:V zygisk_framework.Native:V zygisk_framework.Runtime:V zygisk_framework.Module:V zygisk_framework.Companion:V HookTemplate:V HookTemplate.AndroidId:V HookTemplate.Gaid:V AndroidRuntime:E > "$LOG_FILE"
+capture_logs
 cat "$LOG_FILE" >> "$REPORT"
 
 require_marker "TARGET_MATCH process=$PACKAGE" || FAIL=1
@@ -222,6 +262,12 @@ require_marker "TEMPLATE_HOOK_INSTALLED package=$PACKAGE" || FAIL=1
 require_marker "TEMPLATE_HOOK_BEFORE package=$PACKAGE" || FAIL=1
 require_marker "TEMPLATE_HOOK_AFTER package=$PACKAGE" || FAIL=1
 require_marker "FIXED_ANDROID_ID_APPLIED" || FAIL=1
+if CONFIG_RESULT="$(verify_remote_config_snapshot "$LOG_FILE" REMOTE_CONFIG_LOADED "$TEMPLATE_GROUP" "$PACKAGE" true 0000000000000000 00000000-0000-0000-0000-000000000000)"; then
+  record "$CONFIG_RESULT phase=startup"
+else
+  record "$CONFIG_RESULT phase=startup"
+  FAIL=1
+fi
 if grep -F "TEMPLATE_HOOK_INSTALLED package=$PACKAGE" "$LOG_FILE" | grep -Eq 'failed=[1-9][0-9]*'; then
   record "FAIL template_installation_failure=true"
   FAIL=1
@@ -232,6 +278,35 @@ if GAID_RESULT="$(verify_gaid_events "$LOG_FILE" "$REQUIRE_GAID")"; then
 else
   record "$GAID_RESULT"
   FAIL=1
+fi
+
+if [ "$CHECK_REMOTE_PREFERENCES" = true ]; then
+  CUSTOM_ANDROID_ID="1111111111111111"
+  CUSTOM_GAID="11111111-1111-1111-1111-111111111111"
+  run_root "/data/adb/zygisk_framework/bin/zygisk_framework prefs $MODULE_ID $TEMPLATE_GROUP set android_id string $CUSTOM_ANDROID_ID"
+  run_root "/data/adb/zygisk_framework/bin/zygisk_framework prefs $MODULE_ID $TEMPLATE_GROUP set gaid string $CUSTOM_GAID"
+  wait_remote_config custom true "$CUSTOM_ANDROID_ID" "$CUSTOM_GAID" || FAIL=1
+  run_root "/data/adb/zygisk_framework/bin/zygisk_framework prefs $MODULE_ID $TEMPLATE_GROUP set enabled boolean false"
+  wait_remote_config disabled false "$CUSTOM_ANDROID_ID" "$CUSTOM_GAID" || FAIL=1
+  run_root "/data/adb/zygisk_framework/bin/zygisk_framework prefs $MODULE_ID $TEMPLATE_GROUP remove android_id"
+  wait_remote_config removed false 0000000000000000 "$CUSTOM_GAID" || FAIL=1
+  run_root "/data/adb/zygisk_framework/bin/zygisk_framework prefs $MODULE_ID $TEMPLATE_GROUP clear"
+  wait_remote_config cleared true 0000000000000000 00000000-0000-0000-0000-000000000000 || FAIL=1
+  capture_logs
+  cat "$LOG_FILE" >> "$REPORT"
+  # 配置快照更新成功不代表应用再次读取了标识；单独报告实际自定义值事件。
+  for IDENTIFIER in android_id gaid; do
+    if [ "$IDENTIFIER" = android_id ]; then
+      APPLIED_MARKER="FIXED_ANDROID_ID_APPLIED value=$CUSTOM_ANDROID_ID"
+    else
+      APPLIED_MARKER="GAID_HOOK_APPLIED value=$CUSTOM_GAID"
+    fi
+    if grep -F "$APPLIED_MARKER" "$LOG_FILE" | grep -Fq "package=$PACKAGE process=$PACKAGE "; then
+      record "PASS ${IDENTIFIER}_remote_value=APPLIED"
+    else
+      record "NOT_VERIFIED ${IDENTIFIER}_remote_value=NO_APPLIED_EVENT"
+    fi
+  done
 fi
 
 if grep -E 'FATAL EXCEPTION|Fatal signal|Abort message' "$LOG_FILE" >/dev/null; then

@@ -9,7 +9,7 @@
 - `framework.dex` 由 R8 混淆后导出为 C++ header，并编译进 native loader；Zygisk 通过内置 mapping 找到混淆后的 `NativeBridge` 和 `RuntimeBootstrap`。
 - Framework 和模块 DEX 都通过临时 `dexElements` 挂载预加载，完成入口调用后恢复宿主原始 `dexElements`。
 - 独立业务模块输出混淆后的 `module.dex`，并根据 `module.mapping` 重写 `META-INF/xposed/java_init.list`。
-- `hook_template/` 是独立 Java/Kotlin Hook 模块项目，以 Git 子模块提供。
+- `hook_template/` 是独立 Java/Kotlin Hook 模块项目，以 Git 子模块提供，包含按应用隔离的 Remote Preferences 全局快照和可配置 Android ID/GAID 示例。
 - 设备端 CLI 管理模块 ZIP，入口为 `/data/adb/zygisk_framework/bin/zygisk_framework`。
 - Root Companion 在 specialize 前接管目标进程预创建的 memfd，CLI 写入后通过只读映射和 futex 实时通知目标进程。
 

@@ -82,16 +82,16 @@ zygisk_framework help
 
 ```sh
 ./gradlew packageHookModule
-adb push dist/example_hook-1.3.0.zip /sdcard/Download/
-adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework install /sdcard/Download/example_hook-1.3.0.zip'
+adb push dist/example_hook-1.4.0.zip /sdcard/Download/
+adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework install /sdcard/Download/example_hook-1.4.0.zip'
 ```
 
-`example_hook-1.3.0.zip` 只是示例名称，请替换为实际产物。CLI 不根据文件名推断模块身份，最终安装目录
+`example_hook-1.4.0.zip` 只是示例名称，请替换为实际产物。CLI 不根据文件名推断模块身份，最终安装目录
 由包内 `META-INF/xposed/module.prop` 的 `id` 决定。再次安装相同或更高 `versionCode` 会替换现有版本；
 较低版本默认拒绝，确认需要降级时加 `--force`：
 
 ```sh
-adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework install /sdcard/Download/example_hook-1.3.0.zip --force'
+adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework install /sdcard/Download/example_hook-1.4.0.zip --force'
 ```
 
 ## 模块包校验与安全边界
@@ -125,8 +125,23 @@ adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework prefs example_h
 ```
 
 需要按 App 区分业务配置时，可使用 `settings.<packageName>` group；框架允许任意合法 group 名称。
-以上命令验证 CLI 存储能力。默认 hook_template 使用编译时固定 Android ID/GAID，不订阅远程配置，
-因此写入这些键不会改变模板 Hook 的返回值。
+以上 verification 组命令验证 CLI 存储能力。hook_template 1.4.0 的业务配置使用 settings.<包名>，
+例如目标为 com.example.target：
+
+```sh
+adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework prefs example_hook settings.com.example.target set android_id string 1111111111111111'
+adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework prefs example_hook settings.com.example.target set gaid string 11111111-1111-1111-1111-111111111111'
+adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework prefs example_hook settings.com.example.target set enabled boolean false'
+adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework prefs example_hook settings.com.example.target get android_id'
+adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework prefs example_hook settings.com.example.target remove android_id'
+adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework prefs example_hook settings.com.example.target clear'
+```
+
+enabled 默认为 true，false 使两个标识 Hook 继续原调用，不停止生命周期日志。
+android_id 必须为精确 16 位十六进制，gaid 必须为标准 8-4-4-4-12 UUID 格式；默认分别为 16 位零值和零 UUID。
+删除键或清空恢复默认值；CLI 接受的合法 string 不一定符合业务格式，模板对类型/格式错误保留上次有效值
+并记录 REMOTE_CONFIG_INVALID。REMOTE_CONFIG_LOADED/UPDATED 表示配置已发布，实际替换需另看
+FIXED_ANDROID_ID_APPLIED/GAID_HOOK_APPLIED 及对应值；没有再次调用或已被应用缓存时，不会主动刷新结果。
 
 写入、删除和清空使用 root-only 临时文件原子替换。目标在 specialize 前创建 memfd，Root Companion
 打开并初始化后，目标仅保留只读映射；后续通过 inotify、完整模块快照和 futex 通知已运行的目标进程，

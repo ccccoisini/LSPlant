@@ -29,7 +29,15 @@
 确认应用实际调用标准 Info.getId，且调用没有被内联或换成其他 SDK 路径；仅安装不能证明替换已执行。
 `GAID_HOOK_SKIPPED` 表示缺类/缺方法，`GAID_HOOK_FAILED` 才表示查找或安装错误。
 
-业务自行使用 Remote Preferences 时没有实时更新（默认模板不再订阅）：
+模板 Remote Preferences 没有实时更新：
+确认 CLI 写入 settings.<应用包名>，子进程仍使用应用包名；收集 HookTemplate.Config 日志。
+REMOTE_CONFIG_LOADED 表示初始配置发布，REMOTE_CONFIG_UPDATED 表示有效配置改变；重复写入相同值
+不会产生 UPDATED。REMOTE_CONFIG_INVALID 表示类型/格式错误，该键保留上次有效值；删除键可以恢复默认值。
+REMOTE_CONFIG_UNAVAILABLE 的 stage 和异常可定位连接、订阅、读取或注销失败。
 检查目标进程日志是否出现 `REMOTE_PREFS_CHANNEL_READY mode=SHARED_MEMORY`。若出现
 `SHARED_MEMORY_CREATE_FAILED`、`MAP_FAILED`、`SIZE_LIMIT` 或 `INOTIFY_SETUP_FAILED`，框架只使用启动时
 快照；若出现 `MANAGER_STALLED`，说明 companion 已停止更新 heartbeat，需要重启目标进程建立新通道。
+
+已收到 REMOTE_CONFIG_UPDATED 但没有看到新的标识替换：
+确认 enabled=true，并在应用中再次触发相应读取。配置更新不会刷新应用缓存，也不会重新安装缺类的 GAID Hook。
+必须观察对应值的 FIXED_ANDROID_ID_APPLIED/GAID_HOOK_APPLIED 才能证明实际替换；配置日志本身不能证明业务调用。

@@ -8,8 +8,8 @@ cd hook_template
 ./gradlew packageHookModule
 ```
 
-输出 `dist/<id>-<version>.zip`。模板按 core、hooks、config 分组，默认登记生命周期、固定 Android ID
-和固定 GAID。新增业务实现 HookFeature 并加入 Main 的 HookRegistry 显式列表，使用 Reflect 查找成员、
+输出 `dist/<id>-<version>.zip`。模板按 core、hooks、config 分组，默认登记生命周期、可配置 Android ID
+和 GAID。新增业务实现 HookFeature 并加入 Main 的 HookRegistry 显式列表，使用 Reflect 查找成员、
 HookInstaller 安装统一 before/after/replace 回调。完整接口与 Kotlin/Java 示例见
 [模板开发与团队交接](../hook_template/DEVELOPMENT.md)。修改登记及
 `app/src/main/resources/META-INF/xposed/` 中的模块属性、入口类和 scope 后构建。
@@ -35,8 +35,13 @@ HookInstaller 安装统一 before/after/replace 回调。完整接口与 Kotlin/
 
 同一模块需要分别配置多个目标 App 时，建议在 `onPackageReady` 获得包名后使用
 `getRemotePreferences("settings.${packageName}")`，并让 CLI 写入相同 group。不同包的实例、缓存和
-监听通知相互隔离。默认模板已经移除远程配置示例，
-固定标识集中在 DemoIdentifiers.kt，CLI 写入 enabled/android_id 不会改变其行为。
+监听通知相互隔离。模板在 onPackageReady 中调用 ModuleConfig.initialize(context)，
+由 config/ModuleConfig.kt 统一接收更新并发布不可变 ConfigSnapshot。业务在每次回调中调用
+ModuleConfig.snapshot(packageName)，Kotlin 读取属性，Java 使用 getEnabled/getAndroidId/getGaid。
+默认 enabled=true，android_id 为 16 位零值，gaid 为零 UUID；默认值集中在 DemoIdentifiers.kt。
+enabled=false 时两个标识 Hook 透传，生命周期日志继续输出。删除键恢复默认值，类型/格式错误保留该键
+上次有效值，读取/订阅失败保留快照或使用初始默认值。配置持久化由 CLI/框架负责，目标应用不能 edit 写入。
+详细命令见 [CLI 使用指南](CLI_USAGE.md#remote-preferences)，完整读取示例见模板开发指南。
 
 实时通道在 specialize 前由目标创建 memfd，再由 Root Companion 打开并初始化；目标只保留只读映射，
 specialize 后不保留 companion socket 或共享内存 FD，也不要求 Zygisk 支持 `exemptFd()`。连续快速提交
@@ -57,7 +62,7 @@ git submodule update --init hook_template
 ## 开发验证和交接
 
 在模板仓库运行 `./gradlew :app:testDebugUnitTest packageHookModule`。JVM 测试覆盖反射、筛选、
-安装/卸载重试和回调结果异常，使用计数假链检查每次拦截最多执行一次下游；真机验收另见
+安装/卸载重试、回调结果异常，以及配置更新、并发快照与包名隔离，使用计数假链检查每次拦截最多执行一次下游；真机验收另见
 [真机验收说明](DEVICE_TEST.md)。GAID 缺类允许跳过，必须观察 GAID_HOOK_APPLIED 才能确认其实际执行。
 
 模板是独立 Git 子模块。交接时先提交模板仓库的源码、测试和文档，再由父仓库更新 gitlink，并提交

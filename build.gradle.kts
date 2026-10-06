@@ -17,7 +17,7 @@ val frameworkVersion = moduleProperties.getProperty("version")
     ?: error("magisk_module/module.prop is missing version")
 val frameworkVersionCode = moduleProperties.getProperty("versionCode")?.toIntOrNull()
     ?: error("magisk_module/module.prop has an invalid versionCode")
-val libxposedApiVersion = "102.0.0"
+val xposedApiVersion = "82"
 val compileSdkVersion = 35
 val minSdkVersion = 26
 val buildToolsVersionValue = "35.0.0"
@@ -28,7 +28,7 @@ extra["frameworkId"] = frameworkId
 extra["frameworkName"] = frameworkName
 extra["frameworkVersion"] = frameworkVersion
 extra["frameworkVersionCode"] = frameworkVersionCode
-extra["libxposedApiVersion"] = libxposedApiVersion
+extra["xposedApiVersion"] = xposedApiVersion
 extra["compileSdkVersion"] = compileSdkVersion
 extra["minSdkVersion"] = minSdkVersion
 extra["buildToolsVersionValue"] = buildToolsVersionValue
@@ -87,7 +87,7 @@ tasks.register("packageMagiskModule") {
               "moduleName": "$frameworkName",
               "frameworkVersion": "$frameworkVersion",
               "frameworkVersionCode": $frameworkVersionCode,
-              "libxposedApi": "$libxposedApiVersion",
+              "xposedApi": "$xposedApiVersion",
               "lsplantCommit": "$lsplantSha",
               "dobbyCommit": "$dobbySha",
               "zygiskApi": "4",
@@ -133,6 +133,7 @@ tasks.register("buildAll") {
     dependsOn(
         "verifyPublicDocumentation",
         ":framework_runtime:testDebugUnitTest",
+        ":framework_runtime:exportApi82TestRuntime",
         "packageMagiskModule"
     )
 }

@@ -818,7 +818,7 @@ bool LoadFrameworkAndBootstrap(JNIEnv *env, ProcessState &state, jobject app_cla
         return false;
     }
     jobject framework_loader = CreatePathClassLoaderWithElements(
-            env, host_loader, framework_elements, "FRAMEWORK_CLASSLOADER_PATCH_FAILED");
+            env, parent, framework_elements, "FRAMEWORK_CLASSLOADER_PATCH_FAILED");
     env->DeleteLocalRef(framework_elements);
     if (framework_loader == nullptr) {
         return false;

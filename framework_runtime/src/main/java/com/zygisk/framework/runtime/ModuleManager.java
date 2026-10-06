@@ -1,172 +1,148 @@
 package com.zygisk.framework.runtime;
 
-import android.app.AppComponentFactory;
+import android.app.Application;
+import android.app.Instrumentation;
+import android.content.Context;
 import android.content.pm.ApplicationInfo;
 import android.util.Log;
 
 import java.lang.reflect.Constructor;
+import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 
-import io.github.libxposed.api.XposedModule;
+import de.robv.android.xposed.IXposedHookLoadPackage;
+import de.robv.android.xposed.IXposedHookZygoteInit;
+import de.robv.android.xposed.XC_MethodHook;
+import de.robv.android.xposed.XposedBridge;
+import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
+/** 在目标应用进程内装载 API 82 模块并分发旧版入口。 */
 final class ModuleManager {
-    private static final String TAG = "ZH.Runtime";
-
+    private static final String TAG = "zygisk_framework.Runtime";
     private final HookRegistry hookRegistry = new HookRegistry();
     private final ArrayList<LoadedModule> modules = new ArrayList<LoadedModule>();
-    private boolean packageReadyDispatched;
+    private boolean packageDispatched;
+    private BridgeClassLoader bridgeClassLoader;
 
-    void loadModules(
-            ClassLoader frameworkClassLoader,
-            ClassLoader appClassLoader,
-            String processName,
-            String packageName,
-            ModuleDescriptor[] descriptors) {
-        ClassLoader safeAppClassLoader = appClassLoader == null
-                ? frameworkClassLoader : appClassLoader;
-        BridgeClassLoader bridgeClassLoader =
-                new BridgeClassLoader(frameworkClassLoader, safeAppClassLoader);
+    void loadModules(ClassLoader frameworkLoader, ClassLoader appLoader,
+                     String processName, String packageName, ModuleDescriptor[] descriptors) {
+        XposedBridge.bindRegistry(hookRegistry);
+        ClassLoader safeAppLoader = appLoader == null ? frameworkLoader : appLoader;
+        BridgeClassLoader bridge = new BridgeClassLoader(frameworkLoader, safeAppLoader);
+        bridgeClassLoader = bridge;
         for (ModuleDescriptor descriptor : descriptors) {
-            if (!descriptor.matches(packageName, processName)) {
-                NativeBridge.log(Log.INFO, TAG, "MODULE_SCOPE_SKIP id=" + descriptor.moduleId);
+            if (!descriptor.matches(packageName, processName)) continue;
+            ClassLoader moduleLoader;
+            try {
+                moduleLoader = NativeBridge.createDexClassLoader(
+                        descriptor.dexBuffer.asReadOnlyBuffer(), bridge);
+                if (moduleLoader == null) throw new IllegalStateException("module ClassLoader create failed");
+            } catch (Throwable throwable) {
+                NativeBridge.log(Log.ERROR, TAG,
+                        "MODULE_ENTRY_FAILED code=CLASS_LOADER id=" + descriptor.moduleId, throwable);
                 continue;
             }
-            try {
-                ByteBuffer buffer = descriptor.dexBuffer.asReadOnlyBuffer();
-                ClassLoader moduleClassLoader =
-                        NativeBridge.createDexClassLoader(buffer, bridgeClassLoader);
-                if (moduleClassLoader == null) {
-                    throw new IllegalStateException("module classloader create failed");
+            for (String entryClass : descriptor.entryClasses) {
+                try {
+                    loadEntry(descriptor, moduleLoader, entryClass);
+                } catch (Throwable throwable) {
+                    NativeBridge.log(Log.ERROR, TAG, "MODULE_ENTRY_FAILED code=LOAD_EXCEPTION id="
+                            + descriptor.moduleId + " entry=" + entryClass, throwable);
                 }
-                loadEntry(descriptor, moduleClassLoader, processName);
-                NativeBridge.log(Log.INFO, TAG, "MODULE_DEX_LOADED id=" + descriptor.moduleId);
-            } catch (Throwable throwable) {
-                NativeBridge.log(
-                        Log.ERROR,
-                        TAG,
-                        "MODULE_ENTRY_FAILED code=LOAD_EXCEPTION id=" + descriptor.moduleId,
-                        throwable);
             }
         }
     }
 
-    void dispatchModuleLoaded(String processName) {
-        ModuleLoadedParamImpl param = new ModuleLoadedParamImpl(false, processName);
-        for (LoadedModule module : snapshot()) {
-            try {
-                module.entry.onModuleLoaded(param);
-            } catch (Throwable throwable) {
-                NativeBridge.log(Log.ERROR, TAG, "MODULE_ENTRY_FAILED code=ON_MODULE_LOADED", throwable);
-            }
+    private void loadEntry(ModuleDescriptor descriptor, ClassLoader moduleLoader, String entryClass)
+            throws ReflectiveOperationException {
+        Class<?> clazz = Class.forName(entryClass, true, moduleLoader);
+        boolean loadPackage = IXposedHookLoadPackage.class.isAssignableFrom(clazz);
+        boolean zygoteInit = IXposedHookZygoteInit.class.isAssignableFrom(clazz);
+        if (!loadPackage && !zygoteInit) {
+            throw new IllegalArgumentException(entryClass + " implements no supported Xposed entry interface");
+        }
+        Constructor<?> constructor = clazz.getConstructor();
+        Object entry = constructor.newInstance();
+        FrameworkServices.registerLegacyPackage(descriptor.legacyPackageName, descriptor.moduleId);
+        LoadedModule loaded = new LoadedModule(descriptor.moduleId, descriptor.modulePath,
+                descriptor.legacyPackageName, entry, loadPackage, zygoteInit);
+        modules.add(loaded);
+        if (zygoteInit) dispatchZygote(loaded);
+        NativeBridge.log(Log.INFO, TAG, "MODULE_ENTRY_LOADED id=" + descriptor.moduleId + " entry=" + entryClass);
+    }
+
+    private void dispatchZygote(LoadedModule module) {
+        XposedBridge.setCurrentModule(module.moduleId);
+        try {
+            IXposedHookZygoteInit.StartupParam param = new IXposedHookZygoteInit.StartupParam();
+            param.modulePath = module.modulePath;
+            param.startsSystemServer = false;
+            ((IXposedHookZygoteInit) module.entry).initZygote(param);
+            NativeBridge.log(Log.INFO, TAG, "LEGACY_INIT_ZYGOTE_DISPATCHED id=" + module.moduleId
+                    + " processScope=app");
+        } catch (Throwable throwable) {
+            NativeBridge.log(Log.ERROR, TAG, "MODULE_ENTRY_FAILED code=INIT_ZYGOTE id=" + module.moduleId, throwable);
+        } finally {
+            XposedBridge.clearCurrentModule();
         }
     }
 
-    void dispatchPackageLoaded(
-            String packageName,
-            ApplicationInfo applicationInfo,
-            ClassLoader defaultClassLoader) {
-        PackageLoadedParamImpl param = new PackageLoadedParamImpl(
-                packageName,
-                applicationInfo,
-                true,
-                defaultClassLoader);
-        for (LoadedModule module : snapshot()) {
-            try {
-                module.entry.onPackageLoaded(param);
-            } catch (Throwable throwable) {
-                NativeBridge.log(Log.ERROR, TAG, "MODULE_ENTRY_FAILED code=ON_PACKAGE_LOADED", throwable);
-            }
-        }
-    }
-
-    void dispatchPackageReady(
-            String packageName,
-            ApplicationInfo applicationInfo,
-            ClassLoader classLoader,
-            AppComponentFactory appComponentFactory) {
+    boolean dispatchLoadPackage(String packageName, String processName,
+                                ApplicationInfo applicationInfo, ClassLoader classLoader) {
         synchronized (this) {
-            if (packageReadyDispatched) {
-                return;
-            }
-            packageReadyDispatched = true;
+            if (packageDispatched) return false;
+            packageDispatched = true;
         }
-        PackageReadyParamImpl param = new PackageReadyParamImpl(
-                packageName,
-                applicationInfo,
-                true,
-                classLoader,
-                classLoader,
-                appComponentFactory);
-        NativeBridge.log(Log.INFO, TAG, "PACKAGE_CLASSLOADER_READY package=" + packageName);
+        BridgeClassLoader bridge = bridgeClassLoader;
+        if (bridge != null) bridge.updateAppClassLoader(classLoader);
+        ApplicationInfo safeInfo = applicationInfo == null ? new ApplicationInfo() : applicationInfo;
+        if (safeInfo.packageName == null) safeInfo.packageName = packageName;
+        FrameworkServices.setApplicationState(packageName, processName, safeInfo, classLoader, null);
+        XC_LoadPackage.LoadPackageParam param =
+                new XC_LoadPackage.LoadPackageParam(new XposedBridge.CopyOnWriteSortedSet<XC_LoadPackage>());
+        param.packageName = packageName;
+        param.processName = processName;
+        param.appInfo = safeInfo;
+        param.classLoader = classLoader;
+        param.isFirstApplication = true;
+        NativeBridge.log(Log.INFO, TAG, "HANDLE_LOAD_PACKAGE package=" + packageName + " process=" + processName);
         for (LoadedModule module : snapshot()) {
+            if (!module.loadPackage) continue;
+            XposedBridge.setCurrentModule(module.moduleId);
             try {
-                module.entry.onPackageReady(param);
+                ((IXposedHookLoadPackage) module.entry).handleLoadPackage(param);
             } catch (Throwable throwable) {
-                NativeBridge.log(Log.ERROR, TAG, "MODULE_ENTRY_FAILED code=ON_PACKAGE_READY", throwable);
+                NativeBridge.log(Log.ERROR, TAG, "MODULE_ENTRY_FAILED code=HANDLE_LOAD_PACKAGE id="
+                        + module.moduleId, throwable);
+            } finally {
+                XposedBridge.clearCurrentModule();
             }
         }
+        return true;
     }
 
-    HookRegistry hookRegistry() {
-        return hookRegistry;
-    }
+    HookRegistry hookRegistry() { return hookRegistry; }
 
-    private void loadEntry(
-            ModuleDescriptor descriptor,
-            ClassLoader moduleClassLoader,
-            String processName) throws ReflectiveOperationException {
-        for (String entryClass : descriptor.entryClasses) {
-            Class<?> clazz = Class.forName(entryClass, true, moduleClassLoader);
-            if (!XposedModule.class.isAssignableFrom(clazz)) {
-                NativeBridge.log(
-                        Log.ERROR,
-                        TAG,
-                        "MODULE_ENTRY_TYPE_MISMATCH entry=" + entryClass
-                                + " classLoader=" + clazz.getClassLoader()
-                                + " super=" + clazz.getSuperclass()
-                                + " superLoader=" + (clazz.getSuperclass() == null
-                                        ? null : clazz.getSuperclass().getClassLoader())
-                                + " expected=" + XposedModule.class
-                                + " expectedLoader=" + XposedModule.class.getClassLoader()
-                                + " expectedHash=" + System.identityHashCode(XposedModule.class)
-                                + " superHash=" + System.identityHashCode(clazz.getSuperclass()));
-                throw new IllegalArgumentException(entryClass + " does not extend XposedModule");
-            }
-            Constructor<?> constructor = clazz.getConstructor();
-            XposedModule module = (XposedModule) constructor.newInstance();
-            FrameworkXposedInterface framework =
-                    new FrameworkXposedInterface(descriptor.moduleId, hookRegistry);
-            module.attachFramework(framework, new Runnable() {
-                @Override
-                public void run() {
-                    NativeBridge.log(Log.INFO, TAG, "MODULE_DETACHED id=" + descriptor.moduleId);
-                }
-            });
-            modules.add(new LoadedModule(descriptor.moduleId, module));
-            NativeBridge.log(
-                    Log.INFO,
-                    TAG,
-                    "MODULE_ENTRY_LOADED id=" + descriptor.moduleId
-                            + " entry=" + entryClass
-                            + " process=" + processName);
-        }
-    }
-
-    private List<LoadedModule> snapshot() {
-        synchronized (modules) {
-            return new ArrayList<LoadedModule>(modules);
-        }
-    }
+    private synchronized List<LoadedModule> snapshot() { return new ArrayList<LoadedModule>(modules); }
 
     private static final class LoadedModule {
-        private final String moduleId;
-        private final XposedModule entry;
+        final String moduleId;
+        final String modulePath;
+        final String legacyPackageName;
+        final Object entry;
+        final boolean loadPackage;
+        final boolean zygoteInit;
 
-        private LoadedModule(String moduleId, XposedModule entry) {
+        LoadedModule(String moduleId, String modulePath, String legacyPackageName, Object entry,
+                     boolean loadPackage, boolean zygoteInit) {
             this.moduleId = moduleId;
+            this.modulePath = modulePath;
+            this.legacyPackageName = legacyPackageName;
             this.entry = entry;
+            this.loadPackage = loadPackage;
+            this.zygoteInit = zygoteInit;
         }
     }
 }

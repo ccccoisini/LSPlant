@@ -18,7 +18,12 @@
 
 `scripts/build_all.sh` 会在编译前校验固定的 LSPlant commit，并自动判断 `third_party/patches/lsplant/*.patch` 是待应用、已应用还是与源码不兼容。当前仅保留 `android15-reflection-shorty.patch`，用于兼容 Android 15/厂商 ART 缺少 `GetMethodShorty`/interpreter bridge 内部符号；不兼容的补丁会立即终止构建，避免静默产出错误模块。
 
-当前工程使用 `libs/libxposed-api-102.0.0.jar` 作为真实 API102 编译输入。`framework.dex` 会把 API 类打入自身 DEX，并在 `native_loader` 构建前导出为 C++ header 编译进 `zygisk/*.so`；独立 `hook_template` 项目只把该 jar 放在 compileOnly/classpath，不会打进业务 `module.dex`。
+当前分支以官方 `de.robv.android.xposed:api:82` 为编译签名来源。根工程的
+`libs/libxposed-api-82.jar` 仅作为 Java 编译 Stub，不会打进 `framework.dex`；运行时使用仓库内
+API 82 回调、`XposedHelpers` 和 LSPlant 适配实现。`framework.dex` 再导出为 C++ header 编译进
+`zygisk/*.so`。独立模板通过 `https://api.xposed.info/` 的 `compileOnly` 依赖编译，官方 Stub 和
+测试夹具都不会进入业务 `module.dex`。模板 JVM 测试使用单独导出的
+`hook_template/libs/xposed-api82-runtime-test.jar`，因此独立克隆后也可运行测试。
 
 DEX 混淆产物：
 

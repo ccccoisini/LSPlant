@@ -23,7 +23,7 @@ public final class NativeBridge {
      *
      * @param testDelegate 测试替身；传入 {@code null} 后恢复真实 JNI 调用
      */
-    public static void setDelegateForTests(Delegate testDelegate) {
+    static void setDelegateForTests(Delegate testDelegate) {
         delegate = testDelegate;
     }
 
@@ -99,6 +99,19 @@ public final class NativeBridge {
         return value == null ? "{}" : value;
     }
 
+    /** 执行 LSPlant backup；JVM fake 可替换原调用以覆盖回调链。 */
+    static Object invokeOriginalForHook(Executable executable, Method backup,
+                                        Object receiver, Object[] args) throws Throwable {
+        Delegate current = delegate;
+        if (current != null) return current.invokeOriginal(executable, backup, receiver, args);
+        try {
+            backup.setAccessible(true);
+            return backup.invoke(receiver, args);
+        } catch (java.lang.reflect.InvocationTargetException exception) {
+            throw exception.getCause();
+        }
+    }
+
     /**
      * 临时把 DEX 挂载到宿主 ClassLoader，预加载全部类后恢复宿主原始 dexElements。
      *
@@ -130,10 +143,14 @@ public final class NativeBridge {
     }
 
     static byte[] getRemotePreferencesSnapshot(String moduleId, String group) {
+        Delegate current = delegate;
+        if (current != null) return current.getRemotePreferencesSnapshot(moduleId, group);
         return nativeGetRemotePreferencesSnapshot(moduleId, group);
     }
 
     static byte[] awaitRemotePreferencesUpdate() {
+        Delegate current = delegate;
+        if (current != null) return current.awaitRemotePreferencesUpdate();
         return nativeAwaitRemotePreferencesUpdate();
     }
 
@@ -217,6 +234,27 @@ public final class NativeBridge {
          * @return 原方法备份
          */
         Method hook(Executable executable, Object hookerObject, Method callbackMethod);
+
+        /** 在 JVM fake 中替换 backup 调用；默认行为与真实 LSPlant backup 相同。 */
+        default Object invokeOriginal(Executable executable, Method backup,
+                                      Object receiver, Object[] args) throws Throwable {
+            try {
+                backup.setAccessible(true);
+                return backup.invoke(receiver, args);
+            } catch (java.lang.reflect.InvocationTargetException exception) {
+                throw exception.getCause();
+            }
+        }
+
+        /** 测试环境返回 CLI 快照；生产 Native 通道仍使用 JNI。 */
+        default byte[] getRemotePreferencesSnapshot(String moduleId, String group) {
+            return null;
+        }
+
+        /** 测试环境的更新等待默认结束，避免 JVM 测试调用 Native。 */
+        default byte[] awaitRemotePreferencesUpdate() {
+            return null;
+        }
 
         /**
          * 卸载测试 Hook。

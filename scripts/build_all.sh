@@ -39,6 +39,15 @@ fi
 ./gradlew clean
 ./gradlew buildAll
 
+if [ ! -f "$ROOT_DIR/hook_template/gradlew" ]; then
+  echo "Missing hook_template submodule. Run: git submodule update --init hook_template" >&2
+  exit 1
+fi
+(
+  cd "$ROOT_DIR/hook_template"
+  ./gradlew :app:testDebugUnitTest packageHookModule
+)
+
 MODULE_ZIP="$(find "$ROOT_DIR/dist" -maxdepth 1 -name 'zygisk_framework-*.zip' -type f -print | sort | tail -n 1)"
 if [ -z "$MODULE_ZIP" ] || [ ! -s "$MODULE_ZIP" ]; then
   echo "Missing generated Magisk/KernelSU module zip under $ROOT_DIR/dist" >&2

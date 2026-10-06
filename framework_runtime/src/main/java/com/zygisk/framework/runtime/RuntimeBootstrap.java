@@ -9,7 +9,8 @@ import android.util.Log;
 import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
 
-import io.github.libxposed.api.XposedInterface;
+import de.robv.android.xposed.XC_MethodHook;
+import de.robv.android.xposed.XposedBridge;
 
 /**
  * framework.dex 被 Native 装载后的 Java 启动入口。
@@ -24,7 +25,7 @@ public final class RuntimeBootstrap {
     }
 
     /**
-     * 启动 API102 runtime 并装载独立 Hook 模块。
+     * 启动 API 82 runtime 并装载独立 Hook 模块。
      *
      * @param appClassLoader 当前目标进程可用的 App ClassLoader
      * @param processName 当前进程名
@@ -57,18 +58,18 @@ public final class RuntimeBootstrap {
         ModuleManager manager = new ModuleManager();
         ClassLoader safeAppLoader = appClassLoader == null
                 ? ClassLoader.getSystemClassLoader() : appClassLoader;
+        ApplicationInfo applicationInfo = new ApplicationInfo();
+        applicationInfo.packageName = packageName;
+        FrameworkServices.setApplicationState(packageName, processName,
+                applicationInfo, safeAppLoader, null);
         manager.loadModules(
                 RuntimeBootstrap.class.getClassLoader(),
                 safeAppLoader,
                 processName,
                 packageName,
                 descriptors);
-
-        ApplicationInfo applicationInfo = new ApplicationInfo();
-        applicationInfo.packageName = packageName;
-        manager.dispatchModuleLoaded(processName);
-        manager.dispatchPackageLoaded(packageName, applicationInfo, safeAppLoader);
-        installApplicationLifecycleHooks(manager, packageName, applicationInfo, safeAppLoader);
+        installApplicationLifecycleHooks(manager, packageName, processName,
+                applicationInfo, safeAppLoader);
     }
 
     private static ModuleDescriptor[] buildDescriptors(
@@ -78,16 +79,20 @@ public final class RuntimeBootstrap {
             String[] moduleProps,
             String[] scopeLists) {
         int count = moduleIds == null ? 0 : moduleIds.length;
-        ModuleDescriptor[] descriptors = new ModuleDescriptor[count];
+        java.util.ArrayList<ModuleDescriptor> descriptors = new java.util.ArrayList<ModuleDescriptor>();
         for (int index = 0; index < count; index++) {
-            descriptors[index] = ModuleDescriptor.create(
-                    moduleIds[index],
-                    moduleDexBuffers[index],
-                    valueAt(javaInitLists, index),
-                    valueAt(moduleProps, index),
-                    valueAt(scopeLists, index));
+            try {
+                descriptors.add(ModuleDescriptor.create(
+                        moduleIds[index], moduleDexBuffers[index], valueAt(javaInitLists, index),
+                        valueAt(moduleProps, index), valueAt(scopeLists, index)));
+            } catch (Throwable throwable) {
+                String reason = throwable instanceof ModuleDescriptor.IncompatibleApiException
+                        ? "INCOMPATIBLE_API" : "INVALID_METADATA";
+                NativeBridge.log(Log.ERROR, TAG, "MODULE_ENTRY_FAILED code=" + reason
+                        + " id=" + moduleIds[index], throwable);
+            }
         }
-        return descriptors;
+        return descriptors.toArray(new ModuleDescriptor[0]);
     }
 
     private static String valueAt(String[] values, int index) {
@@ -97,19 +102,16 @@ public final class RuntimeBootstrap {
     private static void installApplicationLifecycleHooks(
             final ModuleManager manager,
             final String packageName,
+            final String processName,
             final ApplicationInfo fallbackInfo,
             final ClassLoader fallbackClassLoader) {
-        FrameworkXposedInterface framework =
-                new FrameworkXposedInterface(BuildConfig.FRAMEWORK_ID, manager.hookRegistry());
+        XposedBridge.bindRegistry(manager.hookRegistry());
+        XposedBridge.setCurrentModule(BuildConfig.FRAMEWORK_ID);
         boolean hookInstalled = false;
         try {
             Method newApplication = Instrumentation.class.getDeclaredMethod(
                     "newApplication", ClassLoader.class, String.class, Context.class);
-            framework.hook(newApplication)
-                    .setId("framework/instrumentation-new-application")
-                    .setPriority(XposedInterface.PRIORITY_HIGHEST)
-                    .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-                    .intercept(new XposedInterface.Hooker() {
+            XposedBridge.hookMethod(newApplication, new XC_MethodHook(XC_MethodHook.PRIORITY_HIGHEST) {
                         /**
                          * 在 Application 实例创建前分发 package ready 生命周期。
                          *
@@ -118,22 +120,21 @@ public final class RuntimeBootstrap {
                          * @throws Throwable 原方法或后续 Hook 抛出的异常
                          */
                         @Override
-                        public Object intercept(XposedInterface.Chain chain) throws Throwable {
-                            ClassLoader loader = (ClassLoader) chain.getArg(0);
-                            String className = (String) chain.getArg(1);
-                            Context context = (Context) chain.getArg(2);
+                        protected void beforeHookedMethod(MethodHookParam param) {
+                            ClassLoader loader = (ClassLoader) param.args[0];
+                            Context context = (Context) param.args[2];
                             ApplicationInfo info = context == null
                                     ? fallbackInfo
                                     : new ApplicationInfo(context.getApplicationInfo());
-                            if (info != null && className != null && className.length() > 0) {
-                                info.className = className;
+                            ClassLoader effectiveLoader = loader == null ? fallbackClassLoader : loader;
+                            FrameworkServices.setApplicationState(packageName, processName,
+                                    info, effectiveLoader, null);
+                            if (manager.dispatchLoadPackage(
+                                    packageName, processName, info, effectiveLoader)) {
+                                NativeBridge.log(Log.INFO, TAG,
+                                        "LIFECYCLE_DISPATCH source=Instrumentation.newApplication "
+                                                + "timing=before-application-constructor");
                             }
-                            manager.dispatchPackageReady(
-                                    packageName,
-                                    info,
-                                    loader == null ? fallbackClassLoader : loader,
-                                    null);
-                            return chain.proceed();
                         }
                     });
             hookInstalled = true;
@@ -146,11 +147,7 @@ public final class RuntimeBootstrap {
         }
         try {
             Method attach = Application.class.getDeclaredMethod("attach", Context.class);
-            framework.hook(attach)
-                    .setId("framework/application-attach")
-                    .setPriority(XposedInterface.PRIORITY_HIGHEST)
-                    .setExceptionMode(XposedInterface.ExceptionMode.PROTECTIVE)
-                    .intercept(new XposedInterface.Hooker() {
+            XposedBridge.hookMethod(attach, new XC_MethodHook(XC_MethodHook.PRIORITY_HIGHEST) {
                         /**
                          * 在 Application.attach 调用原方法前分发 package ready 生命周期。
                          *
@@ -159,14 +156,20 @@ public final class RuntimeBootstrap {
                          * @throws Throwable 原方法或后续 Hook 抛出的异常
                          */
                         @Override
-                        public Object intercept(XposedInterface.Chain chain) throws Throwable {
-                            Context context = (Context) chain.getArg(0);
+                        protected void beforeHookedMethod(MethodHookParam param) {
+                            Context context = (Context) param.args[0];
                             ApplicationInfo info = context == null
                                     ? fallbackInfo : context.getApplicationInfo();
                             ClassLoader loader = context == null
                                     ? fallbackClassLoader : context.getClassLoader();
-                            manager.dispatchPackageReady(packageName, info, loader, null);
-                            return chain.proceed();
+                            Application app = (Application) param.thisObject;
+                            FrameworkServices.setApplicationState(packageName, processName,
+                                    info, loader, app);
+                            if (manager.dispatchLoadPackage(packageName, processName, info, loader)) {
+                                NativeBridge.log(Log.WARN, TAG,
+                                        "LIFECYCLE_FALLBACK source=Application.attach "
+                                                + "timing=after-application-constructor-before-attach");
+                            }
                         }
                     });
             hookInstalled = true;
@@ -185,8 +188,8 @@ public final class RuntimeBootstrap {
                         throwable);
             }
         }
-        if (!hookInstalled) {
-            manager.dispatchPackageReady(packageName, fallbackInfo, fallbackClassLoader, null);
-        }
+        XposedBridge.clearCurrentModule();
+        if (!hookInstalled) NativeBridge.log(Log.ERROR, TAG,
+                "LIFECYCLE_UNAVAILABLE reason=NO_APPLICATION_HOOK");
     }
 }

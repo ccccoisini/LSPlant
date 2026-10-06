@@ -97,7 +97,7 @@ adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework install /sdcard
 ## 模块包校验与安全边界
 
 CLI 在安装前校验 ZIP、必需元数据、入口类、scope、API 兼容范围以及 `module.dex` 的 SHA-256。模块 API
-范围必须覆盖 API 102，DEX 必须非空且不超过 32 MiB。ZIP 必须包含以下文件：
+范围必须覆盖 API 82，DEX 必须非空且不超过 32 MiB。ZIP 必须包含以下文件：
 
 ```text
 module.dex
@@ -113,8 +113,9 @@ ZIP、缺失元数据、无效 ID、API 范围不兼容或 checksum 不匹配时
 
 ## Remote Preferences
 
-Preferences 只允许 root CLI 写入，Hook 进程通过 API 102 的 `getRemotePreferences(group)` 取得只读
-`SharedPreferences`。支持 `string`、`string-set`、`int`、`long`、`float` 和 `boolean`：
+Preferences 只允许 root CLI 写入。API 82 模块可使用 `XSharedPreferences` 取得只读快照；模板的热更新
+封装通过框架扩展读取实时只读 `SharedPreferences`。支持 `string`、`string-set`、`int`、`long`、`float`
+和 `boolean`：
 
 ```sh
 adb shell su -c '/data/adb/zygisk_framework/bin/zygisk_framework prefs example_hook verification set boolean_value boolean true'

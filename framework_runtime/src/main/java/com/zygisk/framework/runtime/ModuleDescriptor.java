@@ -9,7 +9,13 @@ import java.util.Properties;
 import java.util.Set;
 
 final class ModuleDescriptor {
+    static final class IncompatibleApiException extends IllegalArgumentException {
+        IncompatibleApiException(String message) { super(message); }
+    }
+
     final String moduleId;
+    final String modulePath;
+    final String legacyPackageName;
     final ByteBuffer dexBuffer;
     final List<String> entryClasses;
     final Properties properties;
@@ -17,11 +23,15 @@ final class ModuleDescriptor {
 
     private ModuleDescriptor(
             String moduleId,
+            String modulePath,
+            String legacyPackageName,
             ByteBuffer dexBuffer,
             List<String> entryClasses,
             Properties properties,
             Set<String> scopeRules) {
         this.moduleId = moduleId;
+        this.modulePath = modulePath;
+        this.legacyPackageName = legacyPackageName;
         this.dexBuffer = dexBuffer;
         this.entryClasses = entryClasses;
         this.properties = properties;
@@ -44,13 +54,20 @@ final class ModuleDescriptor {
         } catch (java.io.IOException exception) {
             throw new IllegalArgumentException("module.prop parse failed for " + moduleId, exception);
         }
-        int minApi = parseInt(props.getProperty("minApiVersion"), 102);
-        int targetApi = parseInt(props.getProperty("targetApiVersion"), 102);
-        if (minApi > 102 || targetApi < 102) {
-            throw new IllegalArgumentException("Unsupported API range min=" + minApi + " target=" + targetApi);
+        int minApi = parseInt(props.getProperty("minApiVersion"), 82);
+        int targetApi = parseInt(props.getProperty("targetApiVersion"), 82);
+        if (minApi > 82 || targetApi < 82) {
+            throw new IncompatibleApiException(
+                    "Unsupported API range min=" + minApi + " target=" + targetApi);
+        }
+        String legacyPackageName = props.getProperty("legacyPackageName", moduleId).trim();
+        if (!legacyPackageName.matches("[A-Za-z0-9_][A-Za-z0-9_.]*")) {
+            throw new IllegalArgumentException("Invalid legacyPackageName: " + legacyPackageName);
         }
         return new ModuleDescriptor(
                 moduleId,
+                "/data/adb/zygisk_framework/modules/" + moduleId,
+                legacyPackageName,
                 dexBuffer,
                 entries,
                 props,

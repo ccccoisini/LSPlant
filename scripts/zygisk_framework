@@ -773,8 +773,8 @@ validate_stage() {
   is_positive_int "$module_version_code" || fail "versionCode must be a positive 32-bit integer"
   is_positive_int "$module_min_api" || fail "minApiVersion must be a positive integer"
   is_positive_int "$module_target_api" || fail "targetApiVersion must be a positive integer"
-  [ "$module_min_api" -le 102 ] && [ "$module_target_api" -ge 102 ] \
-    || fail "module API range must include API 102"
+  [ "$module_min_api" -le 82 ] && [ "$module_target_api" -ge 82 ] \
+    || fail "module API range must include API 82"
   case "$module_static_scope:$module_hot_reload" in
     true:true|true:false|false:true|false:false) ;;
     *) fail "staticScope and autoHotReload must be true or false" ;;

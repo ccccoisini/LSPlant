@@ -7,7 +7,7 @@ plugins {
 val projectCompileSdk = 35
 val projectMinSdk = 26
 val buildToolsVersionValue = "35.0.0"
-val libxposedApiVersion = rootProject.extra["libxposedApiVersion"] as String
+val xposedApiVersion = rootProject.extra["xposedApiVersion"] as String
 val frameworkId = rootProject.extra["frameworkId"] as String
 val frameworkName = rootProject.extra["frameworkName"] as String
 val frameworkVersion = rootProject.extra["frameworkVersion"] as String
@@ -36,7 +36,7 @@ android {
 }
 
 dependencies {
-    implementation(files(rootProject.file("libs/libxposed-api-$libxposedApiVersion.jar")))
+    compileOnly(files(rootProject.file("libs/libxposed-api-$xposedApiVersion.jar")))
     testImplementation("junit:junit:4.13.2")
 }
 
@@ -67,7 +67,6 @@ tasks.register("buildFrameworkDex") {
         ant.withGroovyBuilder {
             "zip"("destfile" to classesJar.absolutePath, "basedir" to classesDir.absolutePath)
         }
-        val apiJar = rootProject.file("libs/libxposed-api-$libxposedApiVersion.jar")
         val rules = file("proguard-rules.pro")
         val mapping = File(outDir, "framework.mapping")
 
@@ -82,7 +81,6 @@ tasks.register("buildFrameworkDex") {
                 "--pg-map-output", mapping.absolutePath,
                 "--lib", androidJar.absolutePath,
                 classesJar.absolutePath,
-                apiJar.absolutePath
             )
         }
 
@@ -96,6 +94,26 @@ tasks.register("buildFrameworkDex") {
         val sha = sha256(dex)
         File(outDir, "framework.sha256").writeText("$sha  framework.dex\n")
         println("FRAMEWORK_DEX_SHA256: $sha")
+    }
+}
+
+tasks.register("exportApi82TestRuntime") {
+    group = "build"
+    description = "导出供 hook_template JVM/Android 单元测试使用的 API 82 runtime。"
+    dependsOn("compileDebugJavaWithJavac")
+    doLast {
+        val classesDir = layout.buildDirectory.dir(
+            "intermediates/javac/debug/compileDebugJavaWithJavac/classes").get().asFile
+        val destination = rootProject.file("hook_template/libs/xposed-api82-runtime-test.jar")
+        destination.parentFile.mkdirs()
+        delete(destination)
+        ant.withGroovyBuilder {
+            "zip"("destfile" to destination.absolutePath, "basedir" to classesDir.absolutePath,
+                "includes" to "com/zygisk/framework/runtime/**,de/robv/android/xposed/**,android/app/AndroidAppHelper.class," +
+                        "android/content/res/XResources*.class,android/content/res/XModuleResources.class," +
+                        "android/content/res/XResForwarder.class,external/org/apache/commons/lang3/**")
+        }
+        println("API82_TEST_RUNTIME: ${destination.absolutePath}")
     }
 }
 

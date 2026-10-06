@@ -6,6 +6,19 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SKIP_PARTS = {"third_party", "build", ".gradle", ".tmp", "dist"}
 SKIP_FILES = {"zygisk.hpp"}
+UPSTREAM_API_FILES = {
+    "framework_runtime/src/main/java/de/robv/android/xposed/IXposedHookLoadPackage.java",
+    "framework_runtime/src/main/java/de/robv/android/xposed/IXposedHookZygoteInit.java",
+    "framework_runtime/src/main/java/de/robv/android/xposed/XC_MethodHook.java",
+    "framework_runtime/src/main/java/de/robv/android/xposed/XC_MethodReplacement.java",
+    "framework_runtime/src/main/java/de/robv/android/xposed/XposedHelpers.java",
+    "framework_runtime/src/main/java/de/robv/android/xposed/services/BaseService.java",
+    "framework_runtime/src/main/java/de/robv/android/xposed/services/FileResult.java",
+    "framework_runtime/src/main/java/de/robv/android/xposed/callbacks/IXUnhook.java",
+    "framework_runtime/src/main/java/de/robv/android/xposed/callbacks/XCallback.java",
+    "framework_runtime/src/main/java/de/robv/android/xposed/callbacks/XC_LoadPackage.java",
+    "framework_runtime/src/main/java/de/robv/android/xposed/callbacks/XC_LayoutInflated.java",
+}
 JAVA_TYPE = re.compile(r"^\s*public\s+(?:final\s+|abstract\s+)?(?:class|interface|enum|record)\s+")
 JAVA_MEMBER = re.compile(r"^\s*public\s+[\w<>\[\].?,\s]+\s+\w+\s*\(")
 CPP_HEADER_DECL = re.compile(r"^\s*(?:[\w:<>*&]+\s+)+\w+\s*\([^;{]*\)\s*;")
@@ -14,7 +27,10 @@ CHINESE = re.compile(r"[\u4e00-\u9fff]")
 
 
 def skipped(path: pathlib.Path) -> bool:
-    return path.name in SKIP_FILES or any(part in SKIP_PARTS for part in path.parts)
+    relative = path.relative_to(ROOT).as_posix()
+    # 上游 API 82 源码保留原始文档、版权和许可证，不改写其注释语言。
+    return (path.name in SKIP_FILES or relative in UPSTREAM_API_FILES
+            or any(part in SKIP_PARTS for part in path.parts))
 
 
 def has_doc(lines, index):
